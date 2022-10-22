@@ -177,9 +177,10 @@ class BuildingsTab(QtWidgets.QWidget):
 
     def region_change(self):
         self.curr_region = self.region_select.currentText()
+        print(data["regions"])
 
         self.building_list.clear()
-        self.buildings.clear()
+        self.buildings = {}
         if self.curr_region == "Total":
             for region in data["regions"].values():
                 for bname, count in region["buildings"].items():
