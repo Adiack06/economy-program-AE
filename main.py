@@ -4,28 +4,32 @@ import json
 import traceback
 import os
 import datetime
+import re
+
+
 
 BUILDING_INFO = {
-    "Railway Station"               : (13.5,  2,     4968),
-    "Market Stall"                  : (11,    1,     2024.00),
-    "Police Station"                : (19.6,  3,     10819.20),
-    "Post Office"                   : (12.5,  2,     4600.00),
-    "Small Store/Fuel Station"      : (11.5,  2,     4232.00),
-    "Hospital"                      : (26,    3,     14352.00),
-    "Fire station"                  : (19,    2,     6992.00),
-    "Super Store"                   : (12.2,  4,     8979.20),
-    "Pier"                          : (14,    1,     2576.00),
-    "Dock per 10 blocks"            : (15.8,  2,     5814.40),
-    "Quarries Per Chunk"            : (11.2,  2,     4121.60),
-    "Small Factory"                 : (14.5,  6,     16008.00),
-    "Large Factory"                 : (15.5,  12,    34224.00),
-    "Farming 162 block"             : (18.5,  1/162, 21.01),
-    "Naval dockyard per 7 blocks"   : (15.5,  1,     2852.00),
-    "MiLLs"                         : (12,    0,     36500.00),
-    "Airbase"                       : (17.5,  4,     12880.00),
-    "Supply hub"                    : (10.5,  1,     1932.00),
-    "Nuclear/biogas reactor"        : (20.5,  3,     11316.00),
-    "Electrical generation/storage" : (12.5,  2,     4600.00),
+    RAILWAY_STATION       : (13.5,  2,     4968,     "Railway Station"),
+    MARKET_STALL          : (11,    1,     2024.00,  "Market Stall"),
+    POLICE_STATION        : (19.6,  3,     10819.20, "Police Station"),
+    POST_OFFICE           : (12.5,  2,     4600.00,  "Post Office"),
+    SMALL_STORE           : (11.5,  2,     4232.00,  "Small Store/Fuel Station"),
+    HOSPITAL              : (26,    3,     14352.00, "Hospital"),
+    FIRE_STATION          : (19,    2,     6992.00,  "Fire station"),
+    SUPER_STORE           : (12.2,  4,     8979.20,  "Super Store"),
+    PIER                  : (14,    1,     2576.00,  "Pier"),
+    DOCK                  : (15.8,  2,     5814.40,  "Dock per 10 blocks"),
+    QUARRY                : (11.2,  2,     4121.60,  "Quarries Per Chunk"),
+    SMALL_FACTORY         : (14.5,  6,     16008.00, "Small Factory"),
+    LARGE_FACTORY         : (15.5,  12,    34224.00, "Large Factory"),
+    FARMING               : (18.5,  1/162, 21.01,    "Farming per block"),
+    NAVAL_DOCKYARD        : (15.5,  1,     2852.00,  "Naval dockyard per 7 blocks"),
+    MILLS                 : (12,    0,     36500.00, "MiLLs"),
+    AIRBASE               : (17.5,  4,     12880.00, "Airbase"),
+    SUPPLY_HUB            : (10.5,  1,     1932.00,  "Supply hub"),
+    REACTOR               : (20.5,  3,     11316.00, "Nuclear/biogas reactor"),
+    ELECTRICAL_GENERATION : (12.5,  2,     4600.00,  "Electrical generation/storage"),
+    AIRPORT               : (18,    0,     69,       "Airport"),
 }
 MONEY_PREFIX = "UN$"
 
@@ -35,16 +39,15 @@ if os.path.exists("economy.json"):
 else:
     data = {
         "regions": {},
-        "bal": 0,
         "transactions": []
     }
 
 # TODO
 # check region name before creating (duplicates)
-
+# auto change transactions based on price changes
 def save():
     with open("economy.json", "w") as f:
-        f.write(json.dumps(data))
+        f.write(json.dumps(data, indent=4))
 
 def format_date(timestamp):
     return datetime.date.fromtimestamp(timestamp).strftime("%d/%m/%Y")
@@ -227,7 +230,6 @@ class BuildingsTab(QtWidgets.QWidget):
         self.region_select.addItem(region)
         data["regions"][region] = {"buildings": {}}
         save()
-        a -= 3
 
     def region_change(self):
         self.curr_region = self.region_select.currentText()
@@ -255,14 +257,21 @@ class BuildingsTab(QtWidgets.QWidget):
         income = building[1] * building[0] * 8 * count
         self.l_compcost.setText(format_money(building[2] * count))
         self.l_compincome.setText(format_money(income))
-        
-    def add_building(self):
+    
+    def check_real_region(self):
+        """check the current region is not 'Total'. If it is, warn the user
+        returns whether a real region was selected"""
         if self.curr_region == "Total":
             msg = QtWidgets.QMessageBox()
             msg.setIcon(QtWidgets.QMessageBox.Information)
             msg.setText("Select a region before adding a building")
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
             msg.exec_()
+            return False
+        return True
+
+    def add_building(self):
+        if not self.check_real_region():
             return
 
         item = self.type_selector.currentText()
@@ -282,6 +291,9 @@ class BuildingsTab(QtWidgets.QWidget):
                 f"Bought {count}x {item}")
     
     def remove_building(self, entry):
+        if not self.check_real_region():
+            return
+
         item = entry.b_type
         count = entry.count
         if count <= 1:
@@ -291,6 +303,15 @@ class BuildingsTab(QtWidgets.QWidget):
             self.buildings[item] -= 1
             self.building_list.update_building(item, self.buildings[item])
         
+        if self.b_autopay.isChecked():
+            # TODO append to prev transaction
+            # "Sold ([0-9]+)x {name}"
+            self.parent.transactions_tab.add_transaction(
+                BUILDING_INFO[item][2],
+                datetime.datetime.now().timestamp(),
+                f"Sold 1x {item}"
+            )
+        
         data["regions"][self.curr_region]["buildings"] = self.buildings
         save()
 
@@ -299,6 +320,7 @@ class TransactionsTab(QtWidgets.QWidget):
         super().__init__(parent)
         self.layout = QtWidgets.QGridLayout(self)
         self.entry_layout = QtWidgets.QGridLayout(self)
+        
         
         self.e_amount = QtWidgets.QLineEdit(self)
         self.e_comment= QtWidgets.QLineEdit(self)
@@ -353,6 +375,14 @@ class TransactionsTab(QtWidgets.QWidget):
         self.layout.addWidget(self.transaction_widgets[-1][0], idx, 0)
         self.layout.addWidget(self.transaction_widgets[-1][1], idx, 1)
         self.layout.addWidget(self.transaction_widgets[-1][2], idx, 2)
+        
+        self._recalc_balance()
+        
+    def _recalc_balance(self):
+        bal = 0
+        for t in data["transactions"]:
+            bal += t[0]
+        data["bal"] = bal
 
 class StatsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -378,8 +408,6 @@ class Main(QtWidgets.QWidget):
         self.tab_widget.addTab(PriceTab(self), "Price")
         self.layout.addWidget(self.tab_widget)
         self.setLayout(self.layout)
-
-
 
 def exception_hook(exctype, value, tb):
     traceback_formated = traceback.format_exception(exctype, value, tb)
