@@ -1,4 +1,4 @@
-from PyQt5 import QtWidgets, QtCore, Qt
+from PyQt5 import QtWidgets, QtCore, Qt, QtGui
 import sys
 import json
 import traceback
@@ -6,34 +6,84 @@ import os
 import datetime
 import re
 
-RAILWAY_STATION        = 0
-MARKET_STALL           = 1
-POLICE_STATION         = 2
-POST_OFFICE            = 3
-SMALL_STORE            = 4
-HOSPITAL               = 5
-FIRE_STATION           = 6
-SUPER_STORE            = 7
-PIER                   = 8
-DOCK                   = 9
-QUARRY                 = 10
-SMALL_FACTORY          = 11
-LARGE_FACTORY          = 12
-FARMING                = 13
-NAVAL_DOCKYARD         = 14
-MILLS                  = 15
-AIRBASE                = 16
-SUPPLY_HUB             = 17
-REACTOR                = 18
-ELECTRICAL_GENERATION  = 19
-AIRPORT                = 20
+RAILWAY_STATION       = 0
+MARKET_STALL          = 1
+POLICE_STATION        = 2
+POST_OFFICE           = 3
+SMALL_STORE           = 4
+HOSPITAL              = 5
+FIRE_STATION          = 6
+SUPER_STORE           = 7
+PIER                  = 8
+DOCK                  = 9
+QUARRY                = 10
+SMALL_FACTORY         = 11
+LARGE_FACTORY         = 12
+FARMING               = 13
+NAVAL_DOCKYARD        = 14
+MILLS                 = 15
+AIRBASE               = 16
+SUPPLY_HUB            = 17
+REACTOR               = 18
+ELECTRICAL_GENERATION = 19
+AIRPORT               = 20
+HOUSE                 = 21
 
 class BuildingInfo:
-    def __init__(self, wage, employees, cost, name):
+    def __init__(self, wage: float, employees: int, cost: float, name: str):
         self.wage = wage
         self.employees = employees
         self.cost = cost
         self.name = name
+
+class Building:
+    def __init__(self, btype: int, size: int=None):
+        self.btype = type
+        self.size = size
+        
+        if self.btype == AIRPORT or self.btype == HOUSE:
+            assert self.size != None, "For airports and houses, the size must not be None"
+    
+    def cost(self) -> float:
+        if self.btype == AIRPORT:
+            return 69 # TODO fix this
+        elif self.btype == HOUSE:
+            return [1500, 3000, 6000, 9000][self.size]
+        else:
+            return BUILDING_INFO[self.btype].cost
+    
+    def wage(self) -> float:
+        return BUILDING_INFO[self.btype].wage
+    
+    def employees(self) -> int:
+        if self.btype == AIRPORT:
+            return 420 # TODO fix this
+        return BUILDING_INFO[self.btype].employees
+    
+    def name(self) -> str:
+        if self.btype == AIRPORT:
+            return str(self.size) + " block long airport"
+        if self.btype == HOUSE:
+            return str(self.size) + " person house"
+        return BUILDING_INFO[self.btype].name
+        
+    def serialise(self) -> union[list[int, int], int]:
+        # if need to store size, return [type, size]
+        if self.size != None:
+            return [self.btype, self.size]
+        else: # else just a single int
+            return self.btype
+            
+    def deserialise(self, obj: union[list[int, int], int]):
+        # serialised buildings are either a list of [type, size]
+        if type(obj) == type(list):
+            return Building(obj[0], obj[1])
+        else: # or just a single int, being type
+            return Building(obj)
+            
+    def __hash__(self):
+        return hash((self.btype, self.size))
+        
 
 BUILDING_INFO = {
     RAILWAY_STATION       : BuildingInfo(13.5,  2,     4968,     "Railway Station"),
@@ -56,7 +106,8 @@ BUILDING_INFO = {
     SUPPLY_HUB            : BuildingInfo(10.5,  1,     1932.00,  "Supply hub"),
     REACTOR               : BuildingInfo(20.5,  3,     11316.00, "Nuclear/biogas reactor"),
     ELECTRICAL_GENERATION : BuildingInfo(12.5,  2,     4600.00,  "Electrical generation/storage"),
-    AIRPORT               : BuildingInfo(18,    0,     69,       "Airport"),
+    AIRPORT               : BuildingInfo(18,    0,     69,       "Lmao this isn't used"),
+    HOUSE                 : BuildingInfo(0,     0,     69420,    "we need to have a metting latter about the consciousness of this easter egg in the code lmao")),
 }
 
 MONEY_PREFIX = "UN$"
@@ -99,7 +150,7 @@ class Transaction:
         elif self.trans_type == TRANSACTION_BUY:
             return -BUILDING_INFO[self.btype].cost * self.count
         elif self.trans_type == TRANSACTION_SELL:
-            return BUILDING_INFO[self.btype].employees * BUILDING_INFO[self.btype].wage * 8
+            return BUILDING_INFO[self.btype].cost * self.count
             
     def compute_comment(self):
         if self.trans_type == TRANSACTION_MANUAL:
@@ -119,15 +170,12 @@ if os.path.exists("economy.json"):
         raw_data = json.load(f)
         
     for reg in raw_data["regions"]:
-        data["regions"][reg] = {"buildings": {}}
+        data["regions"][reg] = {"buildings": []]
         for b in raw_data["regions"][reg]["buildings"]:
-            data["regions"][reg]["buildings"][int(b)] = raw_data["regions"][reg]["buildings"][b]
+            data["regions"][reg]["buildings"].append(Building.deserialise(b))
             
     data["transactions"] = [Transaction.deserialise(t) for t in raw_data["transactions"]]
     
-# TODO
-# check region name before creating (duplicates)
-# auto change transactions based on price changes
 def save():
     ser_data = {"regions": data["regions"], "transactions": []}
     for t in data["transactions"]:
@@ -150,12 +198,12 @@ def send_info_popup(txt):
 
 class BuildingEntry(Qt.QObject):
     decrease = Qt.pyqtSignal()
-    def __init__(self, b_type, count, parent):
+    def __init__(self, building, count, parent):
         super().__init__()
-        self.b_type = b_type
+        self.building = building
         self.count = count
 
-        self.l_type = QtWidgets.QLabel(BUILDING_INFO[b_type].name, parent)
+        self.l_type = QtWidgets.QLabel(building.name(), parent)
         self.l_count = QtWidgets.QLabel(parent)
         self.l_employed = QtWidgets.QLabel(parent)
         self.l_income = QtWidgets.QLabel(parent)
@@ -169,10 +217,10 @@ class BuildingEntry(Qt.QObject):
         self.update_count(self.count)
         
     def update_count(self, count):
-        self.l_cost.setText(format_money(BUILDING_INFO[self.b_type].cost * count))
+        self.l_cost.setText(format_money(self.building.cost() * count))
         self.l_count.setText(str(count))
-        self.l_income.setText(format_money(BUILDING_INFO[self.b_type].wage * BUILDING_INFO[self.b_type].employees * count * 8))
-        self.l_employed.setText(str(round(BUILDING_INFO[self.b_type].employees * count, 3)))
+        self.l_income.setText(format_money(self.building.wage() * self.building.employees() * count * 8))
+        self.l_employed.setText(str(round(self.building.employees() * count, 3)))
         self.count = count
         
     def remove(self, layout):
@@ -223,17 +271,17 @@ class BuildingList(QtWidgets.QWidget):
         self.layout.addWidget(self.l_income, 0, 3)
         self.layout.addWidget(self.l_cost, 0, 4)
 
-    def add_building(self, b_type, count):
-        item = BuildingEntry(b_type, count, self)
+    def add_building(self, building, count):
+        item = BuildingEntry(building, count, self)
         self.items.append(item)
         idx = len(self.items)
         item.insert(self.layout, idx)
         item.decrease.connect(lambda: self.building_count_decrease.emit(item))
     
-    def remove_building(self, b_type):
+    def remove_building(self, building):
         item = None
         for n in self.items:
-            if n.b_type == b_type:
+            if n.building == building:
                 item = n
         if item != None:        
             item.remove(self.layout)
@@ -241,9 +289,9 @@ class BuildingList(QtWidgets.QWidget):
         else:
             raise RuntimeWarning("BuildingList.remove_building called on non-existent building")
 
-    def update_building(self, b_type, count):
+    def update_building(self, building, count):
         for n in self.items:
-            if n.b_type == b_type:
+            if n.building == building:
                 n.update_count(count)
                 
     def clear(self):
@@ -266,7 +314,7 @@ class BuildingsTab(QtWidgets.QWidget):
         for region in data["regions"].keys():
             self.region_select.addItem(region)
 
-        self.buildings = {}
+        self.buildings = []
         self.building_list = BuildingList(self)
         
         self.layout = QtWidgets.QGridLayout(self)
@@ -312,6 +360,7 @@ class BuildingsTab(QtWidgets.QWidget):
         self.e_count.valueChanged[int].connect(lambda n: self.recalc_preview())
         self.b_add.clicked.connect(self.add_building)
         self.b_newregion.clicked.connect(self.add_region)
+        self.b_delregion.clicked.connect(self.del_region)
         self.region_select.activated[str].connect(lambda r: self.region_change())
         self.building_list.building_count_decrease[BuildingEntry].connect(self.remove_building)
         self.recalc_preview()
@@ -322,29 +371,50 @@ class BuildingsTab(QtWidgets.QWidget):
         if len(region.strip()) == 0:
             send_info_popup("Enter a region name first")
             return
+        if region in data["regions"]:
+            send_info_popup("Enter a unique region name")
+            return
             
         self.e_newregion.setText("")
 
         self.region_select.addItem(region)
-        data["regions"][region] = {"buildings": {}}
+        data["regions"][region] = {"buildings": []}
         save()
+    
+    def del_region(self):
+        if not self.check_real_region():
+            return
+
+        region = self.region_select.currentText()
+        reply = QtWidgets.QMessageBox.question(self, f"Delete region", "Really delete region '{region}'? The buildings won't be transferred.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+        if reply == QtWidgets.QMessageBox.No:
+            return
+            
+        del data["regions"][region]
+        save()
+        self.region_select.removeItem(self.region_select.currentIndex())
 
     def region_change(self):
         self.curr_region = self.region_select.currentText()
 
         self.building_list.clear()
-        self.buildings = {}
+        self.buildings = []
         if self.curr_region == "Total":
             for region in data["regions"].values():
-                for btype, count in region["buildings"].items():
-                    if not btype in self.buildings:
-                        self.buildings[btype] = 0
-                    self.buildings[btype] += count
+                for building in region["buildings"]:
+                    self.buildings.append(building)
         else:
             self.buildings = data["regions"][self.curr_region]["buildings"]
-
-        for btype, count in self.buildings.items():
-            self.building_list.add_building(btype, count)
+        
+        building_nums = {}
+        for building in self.buildings:
+            if not building in building_nums:
+                building_nums[building] = 0
+            building_nums[building] += 1
+        
+        for building, count in building_nums:
+            self.building_list.add_building(building, count)
         
     def recalc_preview(self):
         btype = self.type_selector.currentData()
@@ -358,7 +428,7 @@ class BuildingsTab(QtWidgets.QWidget):
         """check the current region is not 'Total'. If it is, warn the user
         returns whether a real region was selected"""
         if self.curr_region == "Total":
-            send_info_popup("Select a region before adding a building")
+            send_info_popup("Select a region first")
             return False
         return True
 
@@ -406,49 +476,57 @@ class BuildingsTab(QtWidgets.QWidget):
         data["regions"][self.curr_region]["buildings"] = self.buildings
         save()
 
+class KeybindTable(QtWidgets.QTableWidget):
+    keyPressed = Qt.pyqtSignal(QtGui.QKeyEvent)
+    def keyPressEvent(self, event):    
+        if type(event) == QtGui.QKeyEvent:
+            self.keyPressed.emit(event)
+
 class TransactionsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.layout = QtWidgets.QGridLayout(self)
-        # self.entry_layout = QtWidgets.QGridLayout()
         
-        self.table = QtWidgets.QTableWidget(self)
+        self.table = KeybindTable(self)
         self.table.setColumnCount(3)
         self.table.setRowCount(0)
         self.table.setHorizontalHeaderLabels(["Amount", "Date", "Comment"])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
         
-        # self.e_amount = QtWidgets.QLineEdit(self)
-        # self.e_comment= QtWidgets.QLineEdit(self)
-        # self.l_amount = QtWidgets.QLabel("Amount", self)
-        # self.l_comment= QtWidgets.QLabel("Comment", self)
-        # self.l_date   = QtWidgets.QLabel("Date", self)
-        # self.b_add    = QtWidgets.QPushButton("Add", self)
-        # self.spacer   = QtWidgets.QLabel("", self)
-        # self.l_bal    = QtWidgets.QLabel(format_money(0), self)
+        self.e_amount = QtWidgets.QLineEdit(self)
+        self.e_comment= QtWidgets.QLineEdit(self)
+        self.b_add    = QtWidgets.QPushButton("Add", self)
+        self.l_bal    = QtWidgets.QLabel(self)
         
-        self.layout.addWidget(self.table, 0, 0)
-        # self.layout.addWidget(self.l_amount, 1, 0)
-        # self.layout.addWidget(self.l_date, 1, 1)
-        # self.layout.addWidget(self.l_comment, 1, 2)
-        # self.layout.addWidget(self.e_amount, 0, 0)
-        # self.layout.addWidget(self.spacer, 20000, 0) # hacky trick to keep it at the bottom
-        # self.layout.addWidget(self.l_bal, 20001, 0)
-        # self.entry_layout.addWidget(self.e_comment, 0, 0)
-        # self.entry_layout.addWidget(self.b_add, 0, 1)
-        # self.entry_layout.setColumnStretch(0, 1)
-        # self.layout.addLayout(self.entry_layout, 0, 2)
-        # self.layout.setColumnStretch(2, 1)
-        # self.layout.setRowStretch(20000, 1)
+        self.e_amount.setPlaceholderText("Amount")
+        self.e_comment.setPlaceholderText("Comment")
+        
+        self.layout.addWidget(self.table, 1, 0, 1, 3)
+        self.layout.addWidget(self.e_amount, 0, 0)
+        self.layout.addWidget(self.e_comment, 0, 1)
+        self.layout.addWidget(self.b_add, 0, 2)
+        self.layout.addWidget(self.l_bal, 2, 0)
+        self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
         
-        # self.b_add.clicked.connect(self._add_transaction_button)
+        self.b_add.clicked.connect(self._add_transaction_button)
+        self.table.keyPressed[QtGui.QKeyEvent].connect(self._table_keypress)
         
         self.transaction_widgets = []
         
         for t in data["transactions"]:
-            self._add_transaction_widget(t)
+            self._add_transaction_to_table(t)
         self._recalc_balance()
         
+    def _table_keypress(self, event):
+        if event.key() == QtCore.Qt.Key_Delete and self.table.rowCount() > 0:
+            row = self.table.currentRow()
+            data["transactions"].pop(row)
+            self.table.removeRow(row)
+            save()
+            self._recalc_balance()
+
     def _add_transaction_button(self):
         try:
             amount = round(float(self.e_amount.text()), 2)
@@ -459,37 +537,28 @@ class TransactionsTab(QtWidgets.QWidget):
         date = datetime.datetime.now().timestamp()
         comment = self.e_comment.text()
         self.add_transaction(Transaction(TRANSACTION_MANUAL, date, comment=comment, amount=amount))
+        self.e_comment.setText("")
+        self.e_amount.setText("")
     
     def add_transaction(self, transaction: Transaction):
         data["transactions"].append(transaction)
         save()
 
-        self._add_transaction_widget(t)
+        self._add_transaction_to_table(transaction)
         self._recalc_balance()
         
-    def _add_transaction_widget(self, transaction: Transaction):
-        """self.transaction_widgets.append((
-            QtWidgets.QLabel(MONEY_PREFIX + str(transaction.compute_amount()), self),
-            QtWidgets.QLabel(format_date(transaction.timestamp), self),
-            QtWidgets.QLabel(transaction.compute_comment(), self)))
-        
-        idx = len(self.transaction_widgets) + 1
-        self.layout.addWidget(self.transaction_widgets[-1][0], idx, 0)
-        self.layout.addWidget(self.transaction_widgets[-1][1], idx, 1)
-        self.layout.addWidget(self.transaction_widgets[-1][2], idx, 2)"""
+    def _add_transaction_to_table(self, transaction: Transaction):
         row = self.table.rowCount()
         self.table.setRowCount(row + 1)
         self.table.setItem(row, 0, QtWidgets.QTableWidgetItem(format_money(transaction.compute_amount())))
         self.table.setItem(row, 1, QtWidgets.QTableWidgetItem(format_date(transaction.timestamp)))
         self.table.setItem(row, 2, QtWidgets.QTableWidgetItem(transaction.compute_comment()))
-        
-        
 
     def _recalc_balance(self):
         bal = 0
         for t in data["transactions"]:
             bal += t.compute_amount()
-        # self.l_bal.setText("Balance: " + format_money(bal))
+        self.l_bal.setText("Balance: " + format_money(bal))
 
 class StatsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
