@@ -5,6 +5,9 @@ import traceback
 import os
 import datetime
 import re
+from typing import Union
+# TODO
+# display bal after hypothetical buying thing
 
 RAILWAY_STATION       = 0
 MARKET_STALL          = 1
@@ -29,6 +32,14 @@ ELECTRICAL_GENERATION = 19
 AIRPORT               = 20
 HOUSE                 = 21
 
+ROI = 23
+
+# hack to make json serialise my types properly lmao
+def wrapped_default(self, obj):
+    return getattr(obj.__class__, "serialise", wrapped_default.default)(obj)
+wrapped_default.default = json.JSONEncoder().default
+json.JSONEncoder.default = wrapped_default
+
 class BuildingInfo:
     def __init__(self, wage: float, employees: int, cost: float, name: str):
         self.wage = wage
@@ -38,7 +49,9 @@ class BuildingInfo:
 
 class Building:
     def __init__(self, btype: int, size: int=None):
-        self.btype = type
+        self.btype = btype
+        if btype == HOUSE:
+            size = {1: 0, 2: 1, 4: 2, 6: 3}[size] # convert people to index
         self.size = size
         
         if self.btype == AIRPORT or self.btype == HOUSE:
@@ -46,7 +59,7 @@ class Building:
     
     def cost(self) -> float:
         if self.btype == AIRPORT:
-            return 69 # TODO fix this
+            return ROI * self.income()
         elif self.btype == HOUSE:
             return [1500, 3000, 6000, 9000][self.size]
         else:
@@ -57,7 +70,7 @@ class Building:
     
     def employees(self) -> int:
         if self.btype == AIRPORT:
-            return 420 # TODO fix this
+            return self.size / 20
         return BUILDING_INFO[self.btype].employees
     
     def name(self) -> str:
@@ -67,22 +80,28 @@ class Building:
             return str(self.size) + " person house"
         return BUILDING_INFO[self.btype].name
         
-    def serialise(self) -> union[list[int, int], int]:
+    def income(self) -> float:
+        return self.wage() * self.employees() * 8 # 8 hours per day
+        
+    def serialise(self) -> Union[list[int, int], int]:
         # if need to store size, return [type, size]
         if self.size != None:
             return [self.btype, self.size]
         else: # else just a single int
             return self.btype
             
-    def deserialise(self, obj: union[list[int, int], int]):
+    def deserialise(obj: Union[list[int, int], int]):
         # serialised buildings are either a list of [type, size]
-        if type(obj) == type(list):
+        if type(obj) == type([]):
             return Building(obj[0], obj[1])
         else: # or just a single int, being type
             return Building(obj)
             
     def __hash__(self):
         return hash((self.btype, self.size))
+        
+    def __eq__(self, other):
+        return type(self) == type(other) and self.btype == other.btype and self.size == other.size
         
 
 BUILDING_INFO = {
@@ -106,8 +125,8 @@ BUILDING_INFO = {
     SUPPLY_HUB            : BuildingInfo(10.5,  1,     1932.00,  "Supply hub"),
     REACTOR               : BuildingInfo(20.5,  3,     11316.00, "Nuclear/biogas reactor"),
     ELECTRICAL_GENERATION : BuildingInfo(12.5,  2,     4600.00,  "Electrical generation/storage"),
-    AIRPORT               : BuildingInfo(18,    0,     69,       "Lmao this isn't used"),
-    HOUSE                 : BuildingInfo(0,     0,     69420,    "we need to have a metting latter about the consciousness of this easter egg in the code lmao")),
+    AIRPORT               : BuildingInfo(18,    0,     69,       "Airport"),
+    HOUSE                 : BuildingInfo(0,     0,     69420,    "House"),
 }
 
 MONEY_PREFIX = "UN$"
@@ -117,18 +136,18 @@ TRANSACTION_BUY = 2
 TRANSACTION_SELL = 3
 
 class Transaction:
-    def __init__(self, ty, timestamp, *, comment=None, amount=None, btype=None, count=None):
+    def __init__(self, ty, timestamp, *, comment=None, amount=None, building=None, count=None):
         if ty == TRANSACTION_MANUAL:
             assert comment != None, "Comment on manual transaction must not be None"
             assert amount != None, "Amount on manual transaction must not be None"
         else:
-            assert btype != None, "Building type on auto transaction must not be None"
+            assert building != None, "Building type on auto transaction must not be None"
             assert count != None, "Count on auto transaction must not be None"
 
         self.amount = amount
         self.comment = comment
         self.trans_type = ty
-        self.btype = btype
+        self.building = building
         self.count = count
         self.timestamp = timestamp
     
@@ -136,29 +155,29 @@ class Transaction:
         if self.trans_type == TRANSACTION_MANUAL:
             return {"amount": self.amount, "comment": self.comment, "type": self.trans_type, "timestamp": self.timestamp}
         else:
-            return {"count": self.count, "btype": self.btype, "type": self.trans_type, "timestamp": self.timestamp}
+            return {"count": self.count, "building": self.building, "type": self.trans_type, "timestamp": self.timestamp}
 
     def deserialise(object):
         if object["type"] == TRANSACTION_MANUAL:
             return Transaction(object["type"], object["timestamp"], amount=object["amount"], comment=object["comment"])
         else:
-            return Transaction(object["type"], object["timestamp"], btype=object["btype"], count=object["count"])
+            return Transaction(object["type"], object["timestamp"], building=Building.deserialise(object["building"]), count=object["count"])
             
     def compute_amount(self) -> int:
         if self.trans_type == TRANSACTION_MANUAL:
             return self.amount
         elif self.trans_type == TRANSACTION_BUY:
-            return -BUILDING_INFO[self.btype].cost * self.count
+            return -self.building.cost() * self.count
         elif self.trans_type == TRANSACTION_SELL:
-            return BUILDING_INFO[self.btype].cost * self.count
+            return self.building.cost() * self.count
             
     def compute_comment(self):
         if self.trans_type == TRANSACTION_MANUAL:
             return self.comment
         elif self.trans_type == TRANSACTION_BUY:
-            return f"Bought {self.count}x {BUILDING_INFO[self.btype].name}"
+            return f"Bought {self.count}x {self.building.name()}"
         elif self.trans_type == TRANSACTION_SELL:
-            return f"Sold {self.count}x {BUILDING_INFO[self.btype].name}"
+            return f"Sold {self.count}x {self.building.name()}"
 
 data = {
     "regions": {},
@@ -170,18 +189,15 @@ if os.path.exists("economy.json"):
         raw_data = json.load(f)
         
     for reg in raw_data["regions"]:
-        data["regions"][reg] = {"buildings": []]
+        data["regions"][reg] = {"buildings": []}
         for b in raw_data["regions"][reg]["buildings"]:
             data["regions"][reg]["buildings"].append(Building.deserialise(b))
             
     data["transactions"] = [Transaction.deserialise(t) for t in raw_data["transactions"]]
     
 def save():
-    ser_data = {"regions": data["regions"], "transactions": []}
-    for t in data["transactions"]:
-        ser_data["transactions"].append(t.serialise())
     with open("economy.json", "w") as f:
-        f.write(json.dumps(ser_data, indent=4))
+        f.write(json.dumps(data, indent=4))
 
 def format_date(timestamp):
     return datetime.date.fromtimestamp(timestamp).strftime("%d/%m/%Y")
@@ -325,14 +341,21 @@ class BuildingsTab(QtWidgets.QWidget):
 
         self.e_count = QtWidgets.QSpinBox(self)
         self.e_count.setValue(1)
+        self.e_count.setMaximum(999)
+        self.e_size  = QtWidgets.QSpinBox(self)
+        self.e_size.setMaximum(999)
+        self.e_size.hide()
         self.b_add   = QtWidgets.QPushButton("Add", self)
         self.l_compcost = QtWidgets.QLineEdit(self)
         self.l_compincome = QtWidgets.QLineEdit(self)
+        self.l_compemployees=QtWidgets.QLineEdit(self)
         
         self.l_btype = QtWidgets.QLabel("Building type")
         self.l_count = QtWidgets.QLabel("Count")
         self.l_cost  = QtWidgets.QLabel("Cost")
         self.l_income= QtWidgets.QLabel("Income")
+        self.l_employees=QtWidgets.QLabel("Employees")
+        self.l_size  = QtWidgets.QLabel("Size")
         
         self.spacer = QtWidgets.QLabel("", self)
         
@@ -344,20 +367,26 @@ class BuildingsTab(QtWidgets.QWidget):
         self.layout.addWidget(self.l_count, 1, 1)
         self.layout.addWidget(self.l_income, 1, 2)
         self.layout.addWidget(self.l_cost, 1, 3)
+        self.layout.addWidget(self.l_employees, 1, 4)
+        self.layout.addWidget(self.l_size, 1, 5)
         self.layout.addWidget(self.type_selector, 2, 0)
         self.layout.addWidget(self.e_count, 2, 1)
         self.layout.addWidget(self.l_compincome, 2, 2)
         self.layout.addWidget(self.l_compcost, 2, 3)
-        self.layout.addWidget(self.b_add, 2, 4)
-        self.layout.addWidget(self.building_list, 3, 0, 1, 5)
-        self.layout.addWidget(self.spacer, 4, 0, 1, 5)
+        self.layout.addWidget(self.l_compemployees, 2, 4)
+        self.layout.addWidget(self.e_size, 2, 5)
+        self.layout.addWidget(self.b_add, 2, 6)
+        self.layout.addWidget(self.building_list, 3, 0, 1, 7)
+        self.layout.addWidget(self.spacer, 4, 0, 1, 7)
         self.layout.setRowStretch(4, 1)
         self.setLayout(self.layout)
         
         self.l_compcost.setReadOnly(True)
         self.l_compincome.setReadOnly(True)
+        self.l_compemployees.setReadOnly(True)
         self.type_selector.activated[str].connect(lambda t: self.recalc_preview())
         self.e_count.valueChanged[int].connect(lambda n: self.recalc_preview())
+        self.e_size.valueChanged[int].connect(lambda s: self.recalc_preview())
         self.b_add.clicked.connect(self.add_building)
         self.b_newregion.clicked.connect(self.add_region)
         self.b_delregion.clicked.connect(self.del_region)
@@ -365,6 +394,8 @@ class BuildingsTab(QtWidgets.QWidget):
         self.building_list.building_count_decrease[BuildingEntry].connect(self.remove_building)
         self.recalc_preview()
         self.region_change()
+        
+        self.parent.transactions_tab.recalc_income(self.buildings)
 
     def add_region(self):
         region = self.e_newregion.text()
@@ -413,16 +444,31 @@ class BuildingsTab(QtWidgets.QWidget):
                 building_nums[building] = 0
             building_nums[building] += 1
         
-        for building, count in building_nums:
+        for building, count in building_nums.items():
             self.building_list.add_building(building, count)
         
     def recalc_preview(self):
         btype = self.type_selector.currentData()
         count = self.e_count.value()
-        binfo = BUILDING_INFO[btype]
-        income = binfo.employees * binfo.wage * 8 * count
-        self.l_compcost.setText(format_money(binfo.cost * count))
+        if btype == HOUSE or btype == AIRPORT:
+            self.e_size.show()
+            self.l_size.show()
+            size = self.e_size.value()
+            try:
+                building = Building(btype, size)
+            except KeyError: # perhaps the size is not valid yet, let's just ignore that
+                self.l_compcost.setText("Invalid size")
+                self.l_compincome.setText("Invalid size")
+                return
+        else:
+            self.e_size.hide()
+            self.l_size.hide()
+            building = Building(btype)
+            
+        income = building.income() * count
+        self.l_compcost.setText(format_money(building.cost() * count))
         self.l_compincome.setText(format_money(income))
+        self.l_compemployees.setText(str(round(building.employees() * count, 3)))
     
     def check_real_region(self):
         """check the current region is not 'Total'. If it is, warn the user
@@ -437,44 +483,53 @@ class BuildingsTab(QtWidgets.QWidget):
             return
 
         btype = self.type_selector.currentData()
+        if btype == AIRPORT or btype == HOUSE:
+            building = Building(btype, self.e_size.value())
+        else:
+            building = Building(btype)
+
         count = self.e_count.value()
-        if not btype in self.buildings:
-            self.buildings[btype] = 0
-            self.building_list.add_building(btype, 0)
-        self.buildings[btype] += count
-        self.building_list.update_building(btype, self.buildings[btype])
+        if not building in self.buildings:
+            self.building_list.add_building(building, 0)
+        
+        for i in range(count): # hack, just like clicking it multiple times lol
+            self.buildings.append(building)
+
+        self.building_list.update_building(building, self.buildings.count(building))
         data["regions"][self.curr_region]["buildings"] = self.buildings
         save()
         
         self.parent.transactions_tab.add_transaction(Transaction(
             TRANSACTION_BUY,
             datetime.datetime.now().timestamp(),
-            btype=btype,
+            building=building,
             count=count
         ))
+        
+        self.parent.transactions_tab.recalc_income(self.buildings)
 
-    def remove_building(self, entry):
+    def remove_building(self, entry: BuildingEntry):
         if not self.check_real_region():
             return
 
-        btype = entry.b_type
+        building = entry.building
         count = entry.count
+        self.buildings.remove(building)
         if count <= 1:
-            del self.buildings[btype]
-            self.building_list.remove_building(btype)
+            self.building_list.remove_building(building)
         else:
-            self.buildings[btype] -= 1
-            self.building_list.update_building(btype, self.buildings[btype])
+            self.building_list.update_building(building, self.buildings.count(building))
         
         self.parent.transactions_tab.add_transaction(Transaction(
             TRANSACTION_SELL,
             datetime.datetime.now().timestamp(),
-            btype=btype,
+            building=building,
             count=1,
         ))
         
         data["regions"][self.curr_region]["buildings"] = self.buildings
         save()
+        self.parent.transactions_tab.recalc_income(self.buildings)
 
 class KeybindTable(QtWidgets.QTableWidget):
     keyPressed = Qt.pyqtSignal(QtGui.QKeyEvent)
@@ -485,7 +540,9 @@ class KeybindTable(QtWidgets.QTableWidget):
 class TransactionsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.income = 0
         self.layout = QtWidgets.QGridLayout(self)
+        self.bottom_layout = QtWidgets.QHBoxLayout()
         
         self.table = KeybindTable(self)
         self.table.setColumnCount(3)
@@ -498,6 +555,7 @@ class TransactionsTab(QtWidgets.QWidget):
         self.e_comment= QtWidgets.QLineEdit(self)
         self.b_add    = QtWidgets.QPushButton("Add", self)
         self.l_bal    = QtWidgets.QLabel(self)
+        self.l_income = QtWidgets.QLabel(self)
         
         self.e_amount.setPlaceholderText("Amount")
         self.e_comment.setPlaceholderText("Comment")
@@ -506,9 +564,16 @@ class TransactionsTab(QtWidgets.QWidget):
         self.layout.addWidget(self.e_amount, 0, 0)
         self.layout.addWidget(self.e_comment, 0, 1)
         self.layout.addWidget(self.b_add, 0, 2)
-        self.layout.addWidget(self.l_bal, 2, 0)
+        self.layout.addLayout(self.bottom_layout, 2, 0)
         self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
+        
+        self.b_get_paid = QtWidgets.QPushButton("Get paid", self)
+        self.b_get_paid.clicked.connect(self.get_paid)
+        
+        self.bottom_layout.addWidget(self.l_bal)
+        self.bottom_layout.addWidget(self.l_income)
+        self.bottom_layout.addWidget(self.b_get_paid)
         
         self.b_add.clicked.connect(self._add_transaction_button)
         self.table.keyPressed[QtGui.QKeyEvent].connect(self._table_keypress)
@@ -559,6 +624,21 @@ class TransactionsTab(QtWidgets.QWidget):
         for t in data["transactions"]:
             bal += t.compute_amount()
         self.l_bal.setText("Balance: " + format_money(bal))
+        
+    def recalc_income(self, buildings: list[Building]):
+        self.income = 0
+        for b in buildings:
+            self.income += b.income()
+        
+        self.l_income.setText("Income: " + format_money(self.income))
+        
+    def get_paid(self):
+        self.add_transaction(Transaction(
+            TRANSACTION_MANUAL,
+            datetime.datetime.now().timestamp(),
+            comment="Income",
+            amount=self.income,
+        ))
 
 class StatsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
