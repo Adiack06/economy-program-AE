@@ -1,20 +1,95 @@
 {
     "regions": {
-        "Buenos Aires": {
+        "asd": {
             "buildings": [
+                0,
+                0,
+                0,
                 [
-                    20,
-                    100
+                    21,
+                    4
+                ],
+                [
+                    21,
+                    2
+                ]
+            ]
+        },
+        "asd2": {
+            "buildings": [
+                8,
+                [
+                    21,
+                    1
+                ]
+            ]
+        },
+        "test region": {
+            "buildings": [
+                5,
+                5,
+                [
+                    21,
+                    6
                 ]
             ]
         }
     },
     "transactions": [
         {
-            "amount": 40000.0,
-            "comment": "Initial balance",
-            "type": 1,
-            "timestamp": 1666916435.868408
+            "count": 1,
+            "building": 8,
+            "type": 2,
+            "timestamp": "2022-10-10"
+        },
+        {
+            "count": 1,
+            "building": [
+                21,
+                4
+            ],
+            "type": 2,
+            "timestamp": "2022-10-10"
+        },
+        {
+            "count": 1,
+            "building": [
+                21,
+                2
+            ],
+            "type": 2,
+            "timestamp": "2022-10-10"
+        },
+        {
+            "count": 1,
+            "building": [
+                21,
+                1
+            ],
+            "type": 2,
+            "timestamp": "2022-10-10"
+        },
+        {
+            "count": 1,
+            "building": 5,
+            "type": 2,
+            "timestamp": "2022-10-10"
+        },
+        {
+            "count": 1,
+            "building": 5,
+            "type": 2,
+            "timestamp": "2022-10-10"
+        },
+        {
+            "count": 1,
+            "building": [
+                21,
+                6
+            ],
+            "type": 2,
+            "timestamp": "2022-10-10"
         }
-    ]
+    ],
+    "current_day": "2022-10-10"
 }

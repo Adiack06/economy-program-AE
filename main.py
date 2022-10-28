@@ -1,4 +1,9 @@
-from PyQt5 import QtWidgets, QtCore, Qt, QtGui
+from matplotlib.backends.qt_compat import QtWidgets
+from matplotlib.backends.backend_qtagg import (
+    FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
+from matplotlib.figure import Figure
+
+from PyQt5 import QtCore, Qt, QtGui
 import sys
 import json
 import traceback
@@ -50,8 +55,6 @@ class BuildingInfo:
 class Building:
     def __init__(self, btype: int, size: int=None):
         self.btype = btype
-        if btype == HOUSE:
-            size = {1: 0, 2: 1, 4: 2, 6: 3}[size] # convert people to index
         self.size = size
         
         if self.btype == AIRPORT or self.btype == HOUSE:
@@ -61,7 +64,7 @@ class Building:
         if self.btype == AIRPORT:
             return ROI * self.income()
         elif self.btype == HOUSE:
-            return [1500, 3000, 6000, 9000][self.size]
+            return {1: 1500, 2: 3000, 4: 6000, 6: 9000}[self.size]
         else:
             return BUILDING_INFO[self.btype].cost
     
@@ -134,6 +137,7 @@ MONEY_PREFIX = "UN$"
 TRANSACTION_MANUAL = 1
 TRANSACTION_BUY = 2
 TRANSACTION_SELL = 3
+TRANSACTION_INCOME = 4
 
 class Transaction:
     def __init__(self, ty, timestamp, *, comment=None, amount=None, building=None, count=None):
@@ -181,7 +185,8 @@ class Transaction:
 
 data = {
     "regions": {},
-    "transactions": []
+    "transactions": [],
+    "current_day": datetime.date(2022, 10, 10)
 }
 
 if os.path.exists("economy.json"):
@@ -194,13 +199,17 @@ if os.path.exists("economy.json"):
             data["regions"][reg]["buildings"].append(Building.deserialise(b))
             
     data["transactions"] = [Transaction.deserialise(t) for t in raw_data["transactions"]]
+    data["current_day"] = datetime.date.fromisoformat(raw_data["current_day"])
     
 def save():
+    ddata = data.copy()
+    ddata["current_day"] = data["current_day"].isoformat()
+    file_data = json.dumps(ddata, indent=4)
     with open("economy.json", "w") as f:
-        f.write(json.dumps(data, indent=4))
+        f.write(file_data)
 
-def format_date(timestamp):
-    return datetime.date.fromtimestamp(timestamp).strftime("%d/%m/%Y")
+def format_date(date):
+    return datetime.date.fromisoformat(date).strftime("%d/%m/%Y")
 
 def format_money(amt):
     return MONEY_PREFIX + str(round(amt, 2))
@@ -211,6 +220,47 @@ def send_info_popup(txt):
     msg.setText(txt)
     msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
     msg.exec_()
+
+def calc_employment(data):
+    """Return (total, regional) employment calculated given some data"""
+    regions = {}
+    total_people = 0
+    total_jobs = 0
+    for region in data["regions"]:
+        jobs = 0
+        people = 0
+        for building in data["regions"][region]["buildings"]:
+            if building.btype == HOUSE:
+                people += building.size
+            else:
+                jobs += building.employees()
+        
+        if people == 0:
+            rate = 0
+        else:
+            rate = jobs / people
+        regions[region] = rate
+        total_people += people
+        total_jobs += jobs
+    
+    return total_jobs / total_people if total_people != 0 else 0, regions
+
+def calc_income(data):
+    employment, regional_employment = calc_employment(data)
+    gross_income = 0
+    regional_income = {}
+    reduce_by = lambda i, p: i / p if p >= 1 else i * p
+    for region in data["regions"]:
+        region_gross_income = 0
+        for building in data["regions"][region]["buildings"]:
+            region_gross_income += building.income()
+
+        region_income = reduce_by(region_gross_income, regional_employment[region])
+        regional_income[region] = region_income
+        gross_income += region_gross_income
+    
+    income = reduce_by(gross_income, employment)
+    return income, regional_income
 
 class BuildingEntry(Qt.QObject):
     decrease = Qt.pyqtSignal()
@@ -299,7 +349,7 @@ class BuildingList(QtWidgets.QWidget):
         for n in self.items:
             if n.building == building:
                 item = n
-        if item != None:        
+        if item != None:
             item.remove(self.layout)
             self.items.remove(item)
         else:
@@ -395,7 +445,7 @@ class BuildingsTab(QtWidgets.QWidget):
         self.recalc_preview()
         self.region_change()
         
-        self.parent.transactions_tab.recalc_income(self.buildings)
+        self.parent.transactions_tab.recalc_income()
 
     def add_region(self):
         region = self.e_newregion.text()
@@ -454,9 +504,8 @@ class BuildingsTab(QtWidgets.QWidget):
             self.e_size.show()
             self.l_size.show()
             size = self.e_size.value()
-            try:
-                building = Building(btype, size)
-            except KeyError: # perhaps the size is not valid yet, let's just ignore that
+            building = Building(btype, size)
+            if btype == HOUSE and not size in [1, 2, 4, 6]: # perhaps the size is not valid yet, let's just ignore that
                 self.l_compcost.setText("Invalid size")
                 self.l_compincome.setText("Invalid size")
                 return
@@ -501,12 +550,12 @@ class BuildingsTab(QtWidgets.QWidget):
         
         self.parent.transactions_tab.add_transaction(Transaction(
             TRANSACTION_BUY,
-            datetime.datetime.now().timestamp(),
+            data["current_day"].isoformat(),
             building=building,
             count=count
         ))
         
-        self.parent.transactions_tab.recalc_income(self.buildings)
+        self.parent.transactions_tab.recalc_income()
 
     def remove_building(self, entry: BuildingEntry):
         if not self.check_real_region():
@@ -522,14 +571,14 @@ class BuildingsTab(QtWidgets.QWidget):
         
         self.parent.transactions_tab.add_transaction(Transaction(
             TRANSACTION_SELL,
-            datetime.datetime.now().timestamp(),
+            data["current_day"].isoformat(),
             building=building,
             count=1,
         ))
         
         data["regions"][self.curr_region]["buildings"] = self.buildings
         save()
-        self.parent.transactions_tab.recalc_income(self.buildings)
+        self.parent.transactions_tab.recalc_income()
 
 class KeybindTable(QtWidgets.QTableWidget):
     keyPressed = Qt.pyqtSignal(QtGui.QKeyEvent)
@@ -540,6 +589,7 @@ class KeybindTable(QtWidgets.QTableWidget):
 class TransactionsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.parent = parent
         self.income = 0
         self.layout = QtWidgets.QGridLayout(self)
         self.bottom_layout = QtWidgets.QHBoxLayout()
@@ -556,6 +606,7 @@ class TransactionsTab(QtWidgets.QWidget):
         self.b_add    = QtWidgets.QPushButton("Add", self)
         self.l_bal    = QtWidgets.QLabel(self)
         self.l_income = QtWidgets.QLabel(self)
+        self.l_employment=QtWidgets.QLabel(self)
         
         self.e_amount.setPlaceholderText("Amount")
         self.e_comment.setPlaceholderText("Comment")
@@ -573,6 +624,7 @@ class TransactionsTab(QtWidgets.QWidget):
         
         self.bottom_layout.addWidget(self.l_bal)
         self.bottom_layout.addWidget(self.l_income)
+        self.bottom_layout.addWidget(self.l_employment)
         self.bottom_layout.addWidget(self.b_get_paid)
         
         self.b_add.clicked.connect(self._add_transaction_button)
@@ -599,7 +651,7 @@ class TransactionsTab(QtWidgets.QWidget):
             send_info_popup("Enter a valid number for the amount (without any $ or £)")
             return
         
-        date = datetime.datetime.now().timestamp()
+        date = data["current_day"].isoformat()
         comment = self.e_comment.text()
         self.add_transaction(Transaction(TRANSACTION_MANUAL, date, comment=comment, amount=amount))
         self.e_comment.setText("")
@@ -623,26 +675,131 @@ class TransactionsTab(QtWidgets.QWidget):
         bal = 0
         for t in data["transactions"]:
             bal += t.compute_amount()
+        
+        # TODO again terrible, see below
+        self.parent.stats_tab.l_bal.setText("Balance: " + format_money(bal))
         self.l_bal.setText("Balance: " + format_money(bal))
         
-    def recalc_income(self, buildings: list[Building]):
-        self.income = 0
-        for b in buildings:
-            self.income += b.income()
+    def recalc_income(self):
+        employment, regional_employment = calc_employment(data)
+        income, regional_income = calc_income(data)
+        self.income = income # TODO do I need this?
         
+        # TODO terrible place to put this lol
+        # make it better ig (signals?)
+        # Set both the labels at the bottom of this tab and also those of the stats tab
+        self.parent.stats_tab.l_income.setText("Income: " + format_money(self.income))
         self.l_income.setText("Income: " + format_money(self.income))
+        self.parent.stats_tab.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
+        self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
         
     def get_paid(self):
         self.add_transaction(Transaction(
             TRANSACTION_MANUAL,
-            datetime.datetime.now().timestamp(),
+            data["current_day"].isoformat(),
             comment="Income",
             amount=self.income,
         ))
 
+class GraphControls(QtWidgets.QWidget):
+    def __init__(self, figure, parent=None):
+        super().__init__(parent)
+        self.figure = figure
+        self.ax = figure.subplots()
+
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.graph_type = QtWidgets.QComboBox(self)
+        self.x_axis = QtWidgets.QComboBox(self)
+        self.y_axis = QtWidgets.QComboBox(self)
+        
+        self.l_gtype = QtWidgets.QLabel("Graph type", self)
+        self.l_xaxis = QtWidgets.QLabel("Plot...", self)
+        self.l_yaxis = QtWidgets.QLabel("Against...", self)
+        
+        self.b_plot = QtWidgets.QPushButton("Plot", self)
+        
+        self.graph_type.addItems(["Line graph", "Scatter graph", "Bar chart", "Pie chart"])
+        
+        self.layout.addWidget(self.l_gtype)
+        self.layout.addWidget(self.graph_type)
+        self.layout.addWidget(self.l_xaxis)
+        self.layout.addWidget(self.x_axis)
+        self.layout.addWidget(self.l_yaxis)
+        self.layout.addWidget(self.y_axis)
+        self.layout.addWidget(self.b_plot)
+        
+        self.setLayout(self.layout)
+        
+        self.graph_type.activated[str].connect(lambda x: self.update())
+        self.x_axis.activated[str].connect(lambda x: self.update())
+        self.y_axis.activated[str].connect(lambda x: self.update())
+        self.b_plot.clicked.connect(self.plot)
+        
+        self.update()
+        
+    def update(self):
+        ty = self.graph_type.currentText()
+        self.x_axis.clear()
+        self.y_axis.clear()
+        # TODO graph something of just one region
+        if ty == "Line graph":
+            self.x_axis.addItems(["Balance", "Income", "Expenditure", "Employment"])
+            self.y_axis.addItems(["Time"])
+            
+        elif ty == "Pie chart":
+            self.x_axis.addItems(["Income", "Expenditure"])
+            self.y_axis.addItems(["Region"])
+            
+        elif ty == "Bar chart":
+            self.x_axis.addItems(["Employment"])
+            self.y_axis.addItems(["Region"])
+    
+    def plot(self):
+        # TODO do it
+        gtype = self.graph_type.currentText()
+        xaxis = self.x_axis.currentText()
+        yaxis = self.y_axis.currentText()
+        
+        if gtype == "Pie chart":
+            if xaxis == "Income" and yaxis == "Region":
+                _, regional_income = calc_income(data)
+            
+                self.ax.pie(regional_income.values(), labels=regional_income.keys(), autopct='%1.1f%%', shadow=True, startangle=90)
+            self.ax.axis('equal')
+            
+        self.figure.canvas.draw()
+
+
 class StatsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.parent = parent
+        self.layout = QtWidgets.QGridLayout(self)
+        
+        self.l_income = QtWidgets.QLabel(self)
+        self.l_employment = QtWidgets.QLabel(self)
+        self.l_bal = QtWidgets.QLabel(self)
+        self.bottom_spacer = QtWidgets.QLabel(self)
+        
+        self.graph_layout = QtWidgets.QVBoxLayout(self)
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+        self.toolbar = NavigationToolbar(self.canvas, self)       
+        
+        self.graph_layout.addWidget(self.toolbar)
+        self.graph_layout.addWidget(self.canvas)
+        
+        self.graph_controls = GraphControls(self.figure, self)
+                
+        self.layout.addWidget(self.l_income, 0, 0)
+        self.layout.addWidget(self.l_employment, 1, 0)
+        self.layout.addWidget(self.l_bal, 2, 0)
+        self.layout.addWidget(self.graph_controls, 3, 0)
+        self.layout.addWidget(self.bottom_spacer, 3, 0)
+        self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
+        self.layout.setRowStretch(3, 1)
+        self.layout.setColumnStretch(1, 1)
+        self.setLayout(self.layout)
 
 class PriceTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -656,11 +813,15 @@ class Main(QtWidgets.QWidget):
         
     def init_gui(self):
         self.layout = QtWidgets.QVBoxLayout(self)
+
+        self.stats_tab = StatsTab(self)
         self.transactions_tab = TransactionsTab(self)
+        self.buildings_tab = BuildingsTab(self)
+        
         self.tab_widget = QtWidgets.QTabWidget(self)
-        self.tab_widget.addTab(BuildingsTab(self), "Buildings")
+        self.tab_widget.addTab(self.buildings_tab, "Buildings")
         self.tab_widget.addTab(self.transactions_tab, "Transactions")
-        self.tab_widget.addTab(StatsTab(self), "Stats")
+        self.tab_widget.addTab(self.stats_tab, "Stats")
         self.tab_widget.addTab(PriceTab(self), "Price")
         self.layout.addWidget(self.tab_widget)
         self.setLayout(self.layout)
