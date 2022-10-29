@@ -107,13 +107,7 @@
             "comment": "Income",
             "type": 1,
             "timestamp": "2022-10-13"
-        },
-        {
-            "amount": 2008.0,
-            "comment": "Income",
-            "type": 1,
-            "timestamp": "2022-10-17"
         }
     ],
-    "current_day": "2022-10-17"
+    "current_day": "2022-10-15"
 }

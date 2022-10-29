@@ -200,11 +200,15 @@ if os.path.exists("economy.json"):
             
     data["transactions"] = [Transaction.deserialise(t) for t in raw_data["transactions"]]
     data["current_day"] = datetime.date.fromisoformat(raw_data["current_day"])
-    
-def save():
+
+def serialise_all():
     ddata = data.copy()
     ddata["current_day"] = data["current_day"].isoformat()
     file_data = json.dumps(ddata, indent=4)
+    return file_data
+
+def save():
+    file_data = serialise_all()
     with open("economy.json", "w") as f:
         f.write(file_data)
 
@@ -769,6 +773,8 @@ class GraphControls(QtWidgets.QWidget):
             
         self.figure.canvas.draw()
 
+class MoronException(Exception):
+    pass
 
 class StatsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -779,12 +785,13 @@ class StatsTab(QtWidgets.QWidget):
         self.l_income = QtWidgets.QLabel(self)
         self.l_employment = QtWidgets.QLabel(self)
         self.l_bal = QtWidgets.QLabel(self)
+        self.b_next_day = QtWidgets.QPushButton("New day", self)
         self.bottom_spacer = QtWidgets.QLabel(self)
         
         self.graph_layout = QtWidgets.QVBoxLayout(self)
         self.figure = Figure()
         self.canvas = FigureCanvas(self.figure)
-        self.toolbar = NavigationToolbar(self.canvas, self)       
+        self.toolbar = NavigationToolbar(self.canvas, self)
         
         self.graph_layout.addWidget(self.toolbar)
         self.graph_layout.addWidget(self.canvas)
@@ -794,12 +801,32 @@ class StatsTab(QtWidgets.QWidget):
         self.layout.addWidget(self.l_income, 0, 0)
         self.layout.addWidget(self.l_employment, 1, 0)
         self.layout.addWidget(self.l_bal, 2, 0)
-        self.layout.addWidget(self.graph_controls, 3, 0)
-        self.layout.addWidget(self.bottom_spacer, 3, 0)
+        self.layout.addWidget(self.b_next_day, 3, 0)
+        self.layout.addWidget(self.graph_controls, 4, 0)
+        self.layout.addWidget(self.bottom_spacer, 5, 0)
         self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
         self.layout.setRowStretch(3, 1)
         self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
+        
+        self.b_next_day.clicked.connect(self.next_day)
+    
+    def next_day(self):
+        save()
+        if os.path.exists("backups") and os.path.isfile("backups"):
+            raise MoronException("You absolute idiot, you made a file called 'backups', that's where I want to store my backups! Please delete or rename it")
+        if not os.path.exists("backups"):
+            os.mkdir("backups")
+        
+        # Yes, this is a race condition or TOC/TOU bug
+        # The truth is, I do not care, for it is exceedingly unlikely that anything could happen in between
+        # also it wouldn't even matter that much it would just crash and save the progress anyway lmao
+        
+        text_data = serialise_all()
+        with open(os.path.join("backups", data["current_day"].isoformat() + ".json"), "w") as f:
+            f.write(text_data)
+            
+        data["current_day"] += datetime.timedelta(days=1)
 
 class PriceTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
