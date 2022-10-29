@@ -13,6 +13,16 @@ import re
 from typing import Union
 # TODO
 # display bal after hypothetical buying thing
+# buy then sell cancels out
+# bal+eco+employment+new day at bottom of everything (main widget)
+# new day gets u paid
+# show current date at bottom
+# confirmation of delete transaction
+# investigate longer dropdown on windows
+# sort dropdown alphabetically
+# starting money by default
+# current date at bottom
+# selling building asks how much
 
 RAILWAY_STATION       = 0
 MARKET_STALL          = 1
