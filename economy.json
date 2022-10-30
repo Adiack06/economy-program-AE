@@ -1,119 +1,25 @@
 {
     "regions": {
-        "asd": {
+        "reg": {
             "buildings": [
-                0,
-                0,
-                0,
-                [
-                    21,
-                    4
-                ],
-                [
-                    21,
-                    2
-                ]
-            ]
-        },
-        "asd2": {
-            "buildings": [
-                8,
-                [
-                    21,
-                    1
-                ]
-            ]
-        },
-        "test region": {
-            "buildings": [
-                5,
-                5,
-                [
-                    21,
-                    6
-                ]
+                16,
+                16
             ]
         }
     },
     "transactions": [
         {
-            "count": 1,
-            "building": 8,
-            "type": 2,
-            "timestamp": "2022-10-10"
-        },
-        {
-            "count": 1,
-            "building": [
-                21,
-                4
-            ],
-            "type": 2,
-            "timestamp": "2022-10-10"
-        },
-        {
-            "count": 1,
-            "building": [
-                21,
-                2
-            ],
-            "type": 2,
-            "timestamp": "2022-10-10"
-        },
-        {
-            "count": 1,
-            "building": [
-                21,
-                1
-            ],
-            "type": 2,
-            "timestamp": "2022-10-10"
-        },
-        {
-            "count": 1,
-            "building": 5,
-            "type": 2,
-            "timestamp": "2022-10-10"
-        },
-        {
-            "count": 1,
-            "building": 5,
-            "type": 2,
-            "timestamp": "2022-10-10"
-        },
-        {
-            "count": 1,
-            "building": [
-                21,
-                6
-            ],
-            "type": 2,
-            "timestamp": "2022-10-10"
-        },
-        {
-            "amount": 2008.0,
-            "comment": "Income",
+            "amount": 40000,
+            "comment": "Initial balance",
             "type": 1,
-            "timestamp": "2022-10-11"
+            "timestamp": "2022-10-10"
         },
         {
-            "amount": 2008.0,
-            "comment": "Income",
-            "type": 1,
-            "timestamp": "2022-10-12"
-        },
-        {
-            "amount": 2008.0,
-            "comment": "Income",
-            "type": 1,
-            "timestamp": "2022-10-13"
-        },
-        {
-            "amount": 2008.0,
-            "comment": "Income",
-            "type": 1,
-            "timestamp": "2022-10-17"
+            "count": 2,
+            "building": 16,
+            "type": 2,
+            "timestamp": "2022-10-10"
         }
     ],
-    "current_day": "2022-10-17"
+    "current_day": "2022-10-10"
 }

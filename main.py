@@ -13,16 +13,7 @@ import re
 from typing import Union
 # TODO
 # display bal after hypothetical buying thing
-# buy then sell cancels out
-# bal+eco+employment+new day at bottom of everything (main widget)
-# new day gets u paid
-# show current date at bottom
-# confirmation of delete transaction
-# investigate longer dropdown on windows
-# sort dropdown alphabetically
-# starting money by default
-# current date at bottom
-# selling building asks how much
+# edit transactions
 
 RAILWAY_STATION       = 0
 MARKET_STALL          = 1
@@ -195,7 +186,7 @@ class Transaction:
 
 data = {
     "regions": {},
-    "transactions": [],
+    "transactions": [Transaction(TRANSACTION_MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance")],
     "current_day": datetime.date(2022, 10, 10)
 }
 
@@ -400,9 +391,10 @@ class BuildingsTab(QtWidgets.QWidget):
         self.layout = QtWidgets.QGridLayout(self)
         
         self.type_selector = QtWidgets.QComboBox(self)
-        for btype, binfo in BUILDING_INFO.items():
+        for btype, binfo in sorted(BUILDING_INFO.items(), key=lambda n: n[1].name):
             self.type_selector.addItem(binfo.name, userData=btype)
-
+        self.type_selector.setMaxVisibleItems(len(BUILDING_INFO))
+        
         self.e_count = QtWidgets.QSpinBox(self)
         self.e_count.setValue(1)
         self.e_count.setMaximum(999)
@@ -459,8 +451,6 @@ class BuildingsTab(QtWidgets.QWidget):
         self.recalc_preview()
         self.region_change()
         
-        self.parent.transactions_tab.recalc_income()
-
     def add_region(self):
         region = self.e_newregion.text()
         if len(region.strip()) == 0:
@@ -569,30 +559,44 @@ class BuildingsTab(QtWidgets.QWidget):
             count=count
         ))
         
-        self.parent.transactions_tab.recalc_income()
-
     def remove_building(self, entry: BuildingEntry):
         if not self.check_real_region():
             return
 
+        count, ok = QtWidgets.QInputDialog.getInt(self, "Sell building", "How many do you want to sell?", 1, 1, entry.count)
+        if not ok:
+            return
+        
         building = entry.building
-        count = entry.count
-        self.buildings.remove(building)
-        if count <= 1:
+        for i in range(count): # TODO surely there's a better way than this
+            self.buildings.remove(building)
+        
+        if entry.count <= count:
             self.building_list.remove_building(building)
         else:
             self.building_list.update_building(building, self.buildings.count(building))
-        
-        self.parent.transactions_tab.add_transaction(Transaction(
-            TRANSACTION_SELL,
-            data["current_day"].isoformat(),
-            building=building,
-            count=1,
-        ))
+
+        last_t = data["transactions"][-1]
+        if last_t.trans_type == TRANSACTION_BUY and last_t.building == building and last_t.count >= count:
+            # update/cancel out last transaction instead
+            if last_t.count == count:
+                # get rid entirely
+                data["transactions"].pop(-1)
+                self.parent.transactions_tab.table.removeRow(len(data["transactions"]))
+            else:
+                last_t.count -= count
+                self.parent.transactions_tab.set_row_to(len(data["transactions"]) - 1, last_t)
+
+        else:
+            self.parent.transactions_tab.add_transaction(Transaction(
+                TRANSACTION_SELL,
+                data["current_day"].isoformat(),
+                building=building,
+                count=count,
+            ))
         
         data["regions"][self.curr_region]["buildings"] = self.buildings
         save()
-        self.parent.transactions_tab.recalc_income()
 
 class KeybindTable(QtWidgets.QTableWidget):
     keyPressed = Qt.pyqtSignal(QtGui.QKeyEvent)
@@ -601,10 +605,10 @@ class KeybindTable(QtWidgets.QTableWidget):
             self.keyPressed.emit(event)
 
 class TransactionsTab(QtWidgets.QWidget):
+    recalculate = Qt.pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.income = 0
         self.layout = QtWidgets.QGridLayout(self)
         self.bottom_layout = QtWidgets.QHBoxLayout()
         
@@ -618,10 +622,7 @@ class TransactionsTab(QtWidgets.QWidget):
         self.e_amount = QtWidgets.QLineEdit(self)
         self.e_comment= QtWidgets.QLineEdit(self)
         self.b_add    = QtWidgets.QPushButton("Add", self)
-        self.l_bal    = QtWidgets.QLabel(self)
-        self.l_income = QtWidgets.QLabel(self)
-        self.l_employment=QtWidgets.QLabel(self)
-        
+
         self.e_amount.setPlaceholderText("Amount")
         self.e_comment.setPlaceholderText("Comment")
         
@@ -629,17 +630,8 @@ class TransactionsTab(QtWidgets.QWidget):
         self.layout.addWidget(self.e_amount, 0, 0)
         self.layout.addWidget(self.e_comment, 0, 1)
         self.layout.addWidget(self.b_add, 0, 2)
-        self.layout.addLayout(self.bottom_layout, 2, 0)
         self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
-        
-        self.b_get_paid = QtWidgets.QPushButton("Get paid", self)
-        self.b_get_paid.clicked.connect(self.get_paid)
-        
-        self.bottom_layout.addWidget(self.l_bal)
-        self.bottom_layout.addWidget(self.l_income)
-        self.bottom_layout.addWidget(self.l_employment)
-        self.bottom_layout.addWidget(self.b_get_paid)
         
         self.b_add.clicked.connect(self._add_transaction_button)
         self.table.keyPressed[QtGui.QKeyEvent].connect(self._table_keypress)
@@ -648,15 +640,18 @@ class TransactionsTab(QtWidgets.QWidget):
         
         for t in data["transactions"]:
             self._add_transaction_to_table(t)
-        self._recalc_balance()
+        self.recalculate.emit()
         
     def _table_keypress(self, event):
         if event.key() == QtCore.Qt.Key_Delete and self.table.rowCount() > 0:
+            cont = QtWidgets.QMessageBox.question(self, "Really delete transaction?", "Really delete transaction?")
+            if cont == QtWidgets.QMessageBox.No:
+                return
             row = self.table.currentRow()
             data["transactions"].pop(row)
             self.table.removeRow(row)
             save()
-            self._recalc_balance()
+            self.recalculate.emit()
 
     def _add_transaction_button(self):
         try:
@@ -676,44 +671,17 @@ class TransactionsTab(QtWidgets.QWidget):
         save()
 
         self._add_transaction_to_table(transaction)
-        self._recalc_balance()
+        self.recalculate.emit()
         
     def _add_transaction_to_table(self, transaction: Transaction):
         row = self.table.rowCount()
         self.table.setRowCount(row + 1)
+        self.set_row_to(row, transaction)
+    
+    def set_row_to(self, row, transaction):
         self.table.setItem(row, 0, QtWidgets.QTableWidgetItem(format_money(transaction.compute_amount())))
         self.table.setItem(row, 1, QtWidgets.QTableWidgetItem(format_date(transaction.timestamp)))
         self.table.setItem(row, 2, QtWidgets.QTableWidgetItem(transaction.compute_comment()))
-
-    def _recalc_balance(self):
-        bal = 0
-        for t in data["transactions"]:
-            bal += t.compute_amount()
-        
-        # TODO again terrible, see below
-        self.parent.stats_tab.l_bal.setText("Balance: " + format_money(bal))
-        self.l_bal.setText("Balance: " + format_money(bal))
-        
-    def recalc_income(self):
-        employment, regional_employment = calc_employment(data)
-        income, regional_income = calc_income(data)
-        self.income = income # TODO do I need this?
-        
-        # TODO terrible place to put this lol
-        # make it better ig (signals?)
-        # Set both the labels at the bottom of this tab and also those of the stats tab
-        self.parent.stats_tab.l_income.setText("Income: " + format_money(self.income))
-        self.l_income.setText("Income: " + format_money(self.income))
-        self.parent.stats_tab.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
-        self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
-        
-    def get_paid(self):
-        self.add_transaction(Transaction(
-            TRANSACTION_MANUAL,
-            data["current_day"].isoformat(),
-            comment="Income",
-            amount=self.income,
-        ))
 
 class GraphControls(QtWidgets.QWidget):
     def __init__(self, figure, parent=None):
@@ -792,12 +760,6 @@ class StatsTab(QtWidgets.QWidget):
         self.parent = parent
         self.layout = QtWidgets.QGridLayout(self)
         
-        self.l_income = QtWidgets.QLabel(self)
-        self.l_employment = QtWidgets.QLabel(self)
-        self.l_bal = QtWidgets.QLabel(self)
-        self.b_next_day = QtWidgets.QPushButton("New day", self)
-        self.bottom_spacer = QtWidgets.QLabel(self)
-        
         self.graph_layout = QtWidgets.QVBoxLayout(self)
         self.figure = Figure()
         self.canvas = FigureCanvas(self.figure)
@@ -808,19 +770,98 @@ class StatsTab(QtWidgets.QWidget):
         
         self.graph_controls = GraphControls(self.figure, self)
                 
-        self.layout.addWidget(self.l_income, 0, 0)
-        self.layout.addWidget(self.l_employment, 1, 0)
-        self.layout.addWidget(self.l_bal, 2, 0)
-        self.layout.addWidget(self.b_next_day, 3, 0)
         self.layout.addWidget(self.graph_controls, 4, 0)
-        self.layout.addWidget(self.bottom_spacer, 5, 0)
         self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
-        self.layout.setRowStretch(3, 1)
         self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
         
+
+class PriceTab(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+class Main(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        self.init_gui()
+
+        self.show()
+        
+    def init_gui(self):
+        self.layout = QtWidgets.QVBoxLayout(self)
+
+        self.stats_tab = StatsTab(self)
+        self.transactions_tab = TransactionsTab(self)
+        self.buildings_tab = BuildingsTab(self)
+        
+        self.tab_widget = QtWidgets.QTabWidget(self)
+        self.tab_widget.addTab(self.buildings_tab, "Buildings")
+        self.tab_widget.addTab(self.transactions_tab, "Transactions")
+        self.tab_widget.addTab(self.stats_tab, "Stats")
+        self.tab_widget.addTab(PriceTab(self), "Price")
+        self.layout.addWidget(self.tab_widget)
+        
+        self.bottom_layout = QtWidgets.QHBoxLayout()
+        self.b_next_day = QtWidgets.QPushButton("New day", self)
         self.b_next_day.clicked.connect(self.next_day)
-    
+
+        self.l_bal = QtWidgets.QLabel(self)
+        self.l_income = QtWidgets.QLabel(self)
+        self.l_employment = QtWidgets.QLabel(self)
+        self.l_date = QtWidgets.QLabel(self)
+
+        self.bottom_layout.addWidget(self.l_bal)
+        self.bottom_layout.addWidget(self.l_income)
+        self.bottom_layout.addWidget(self.l_employment)
+        self.bottom_layout.addWidget(self.l_date)
+        self.bottom_layout.addWidget(self.b_next_day)
+        
+        self.layout.addLayout(self.bottom_layout)
+        
+        self.setLayout(self.layout)
+        self.recalculate()
+        self.transactions_tab.recalculate.connect(self.recalculate)
+
+    def recalculate(self):
+        self.recalc_balance()
+        self.recalc_income()
+        self.l_date.setText("Current date: " + format_date(data["current_day"].isoformat()))
+
+    def calc_bal(self):
+        bal = 0
+        for t in data["transactions"]:
+            bal += t.compute_amount()
+        
+        return bal
+
+    def recalc_balance(self):
+        bal = self.calc_bal()
+        self.l_bal.setText("Balance: " + format_money(bal))
+        
+    def recalc_income(self):
+        employment, regional_employment = calc_employment(data)
+        income, regional_income = calc_income(data)
+
+        self.l_income.setText("Income: " + format_money(income))
+        self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
+        
+    def get_paid(self):
+        income, regional_income = calc_income(data)
+        self.transactions_tab.add_transaction(Transaction(
+            TRANSACTION_MANUAL,
+            data["current_day"].isoformat(),
+            comment="Income",
+            amount=income,
+        ))
+        bal = self.calc_bal()
+        if bal < 0:
+            self.transactions_tab.add_transaction(Transaction(
+                TRANSACTION_MANUAL,
+                data["current_day"].isoformat(),
+                comment="Debt interest",
+                amount=bal * 0.25,
+            ))
+
     def next_day(self):
         save()
         if os.path.exists("backups") and os.path.isfile("backups"):
@@ -837,31 +878,8 @@ class StatsTab(QtWidgets.QWidget):
             f.write(text_data)
             
         data["current_day"] += datetime.timedelta(days=1)
-
-class PriceTab(QtWidgets.QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-class Main(QtWidgets.QWidget):
-    def __init__(self):
-        super().__init__()
-        self.init_gui()
-        self.show()
-        
-    def init_gui(self):
-        self.layout = QtWidgets.QVBoxLayout(self)
-
-        self.stats_tab = StatsTab(self)
-        self.transactions_tab = TransactionsTab(self)
-        self.buildings_tab = BuildingsTab(self)
-        
-        self.tab_widget = QtWidgets.QTabWidget(self)
-        self.tab_widget.addTab(self.buildings_tab, "Buildings")
-        self.tab_widget.addTab(self.transactions_tab, "Transactions")
-        self.tab_widget.addTab(self.stats_tab, "Stats")
-        self.tab_widget.addTab(PriceTab(self), "Price")
-        self.layout.addWidget(self.tab_widget)
-        self.setLayout(self.layout)
+        self.get_paid()
+        save()
 
 def exception_hook(exctype, value, tb):
     traceback_formated = traceback.format_exception(exctype, value, tb)
