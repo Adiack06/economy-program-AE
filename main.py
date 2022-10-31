@@ -41,7 +41,7 @@ AIRPORT               = 20
 HOUSE                 = 21
 
 # this is wrong lmao idk what it is tho
-ROI = 23
+ROI = 13
 
 BUILDING_INFO = {
     RAILWAY_STATION       : BuildingInfo(13.5,  2,     2808,     "Railway Station"),
