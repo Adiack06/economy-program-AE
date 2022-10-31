@@ -88,7 +88,7 @@ if os.path.exists("economy.json"):
 def serialise_all():
     ddata = data.copy()
     ddata["current_day"] = data["current_day"].isoformat()
-    file_data = json.dumps(ddata, indent=4)
+    file_data = json.dumps(ddata, indent=None)
     return file_data
 
 def save():
@@ -527,10 +527,14 @@ class TransactionsTab(QtWidgets.QWidget):
         
     def _table_keypress(self, event):
         if event.key() == QtCore.Qt.Key_Delete and self.table.rowCount() > 0:
+            row = self.table.currentRow()
+            t = data["transactions"][row]
+            if t.trans_type != TRANSACTION_MANUAL:
+                return
+
             cont = QtWidgets.QMessageBox.question(self, "Really delete transaction?", "Really delete transaction?")
             if cont == QtWidgets.QMessageBox.No:
                 return
-            row = self.table.currentRow()
             data["transactions"].pop(row)
             self.table.removeRow(row)
             save()

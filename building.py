@@ -21,6 +21,14 @@ class Building:
         return BUILDING_INFO[self.btype].wage
     
     def employees(self) -> int:
+        #annoying hack to make airports bought before some date
+        if self.btype == AIRPORT:
+            ts = datetime.date.fromisoformat(self.timestamp)
+            if ts < datetime.date(2022, 10, 20):
+                employees = 6
+            else:
+                employees = self.building.employees()
+            
         if self.btype == AIRPORT:
             return self.size / 20
         return BUILDING_INFO[self.btype].employees
