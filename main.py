@@ -1,9 +1,12 @@
-from matplotlib.backends.qt_compat import QtWidgets
-from matplotlib.backends.backend_qtagg import (
-    FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
-from matplotlib.figure import Figure
+#from matplotlib.backends.qt_compat import QtWidgets
+#from matplotlib.backends.backend_qtagg import (
+#    FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
+#from matplotlib.figure import Figure
+# TODO
+# display bal after hypothetical buying thing
+# edit transactions
 
-from PyQt5 import QtCore, Qt, QtGui
+from PyQt5 import QtCore, Qt, QtGui, QtWidgets
 import sys
 import json
 import traceback
@@ -11,10 +14,9 @@ import os
 import datetime
 import re
 from typing import Union
-# TODO
-# display bal after hypothetical buying thing
-# edit transactions
+from building import *
 
+# IDs
 RAILWAY_STATION       = 0
 MARKET_STALL          = 1
 POLICE_STATION        = 2
@@ -38,75 +40,8 @@ ELECTRICAL_GENERATION = 19
 AIRPORT               = 20
 HOUSE                 = 21
 
+# this is wrong lmao idk what it is tho
 ROI = 23
-
-# hack to make json serialise my types properly lmao
-def wrapped_default(self, obj):
-    return getattr(obj.__class__, "serialise", wrapped_default.default)(obj)
-wrapped_default.default = json.JSONEncoder().default
-json.JSONEncoder.default = wrapped_default
-
-class BuildingInfo:
-    def __init__(self, wage: float, employees: int, cost: float, name: str):
-        self.wage = wage
-        self.employees = employees
-        self.cost = cost
-        self.name = name
-
-class Building:
-    def __init__(self, btype: int, size: int=None):
-        self.btype = btype
-        self.size = size
-        
-        if self.btype == AIRPORT or self.btype == HOUSE:
-            assert self.size != None, "For airports and houses, the size must not be None"
-    
-    def cost(self) -> float:
-        if self.btype == AIRPORT:
-            return ROI * self.income()
-        elif self.btype == HOUSE:
-            return {1: 1500, 2: 3000, 4: 6000, 6: 9000}[self.size]
-        else:
-            return BUILDING_INFO[self.btype].cost
-    
-    def wage(self) -> float:
-        return BUILDING_INFO[self.btype].wage
-    
-    def employees(self) -> int:
-        if self.btype == AIRPORT:
-            return self.size / 20
-        return BUILDING_INFO[self.btype].employees
-    
-    def name(self) -> str:
-        if self.btype == AIRPORT:
-            return str(self.size) + " block long airport"
-        if self.btype == HOUSE:
-            return str(self.size) + " person house"
-        return BUILDING_INFO[self.btype].name
-        
-    def income(self) -> float:
-        return self.wage() * self.employees() * 8 # 8 hours per day
-        
-    def serialise(self) -> Union[list[int, int], int]:
-        # if need to store size, return [type, size]
-        if self.size != None:
-            return [self.btype, self.size]
-        else: # else just a single int
-            return self.btype
-            
-    def deserialise(obj: Union[list[int, int], int]):
-        # serialised buildings are either a list of [type, size]
-        if type(obj) == type([]):
-            return Building(obj[0], obj[1])
-        else: # or just a single int, being type
-            return Building(obj)
-            
-    def __hash__(self):
-        return hash((self.btype, self.size))
-        
-    def __eq__(self, other):
-        return type(self) == type(other) and self.btype == other.btype and self.size == other.size
-        
 
 BUILDING_INFO = {
     RAILWAY_STATION       : BuildingInfo(13.5,  2,     4968,     "Railway Station"),
@@ -189,6 +124,12 @@ data = {
     "transactions": [Transaction(TRANSACTION_MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance")],
     "current_day": datetime.date(2022, 10, 10)
 }
+
+# hack to make json serialise my types properly lmao
+def wrapped_default(self, obj):
+    return getattr(obj.__class__, "serialise", wrapped_default.default)(obj)
+wrapped_default.default = json.JSONEncoder().default
+json.JSONEncoder.default = wrapped_default
 
 if os.path.exists("economy.json"):
     with open("economy.json", "r") as f:
@@ -760,19 +701,19 @@ class StatsTab(QtWidgets.QWidget):
         self.parent = parent
         self.layout = QtWidgets.QGridLayout(self)
         
-        self.graph_layout = QtWidgets.QVBoxLayout(self)
-        self.figure = Figure()
-        self.canvas = FigureCanvas(self.figure)
-        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.graph_layout = QtWidgets.QVBoxLayout()
+        #self.figure = Figure()
+        #self.canvas = FigureCanvas(self.figure)
+       # self.toolbar = NavigationToolbar(self.canvas, self)
         
-        self.graph_layout.addWidget(self.toolbar)
-        self.graph_layout.addWidget(self.canvas)
+        #self.graph_layout.addWidget(self.toolbar)
+        #self.graph_layout.addWidget(self.canvas)
         
-        self.graph_controls = GraphControls(self.figure, self)
+        #self.graph_controls = GraphControls(self.figure, self)
                 
-        self.layout.addWidget(self.graph_controls, 4, 0)
-        self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
-        self.layout.setColumnStretch(1, 1)
+        #self.layout.addWidget(self.graph_controls, 4, 0)
+        #self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
+        #self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
         
 
@@ -900,4 +841,13 @@ if __name__ == '__main__':
     sys.excepthook = exception_hook
     app = QtWidgets.QApplication(sys.argv)
     ex = Main()
+    if os.path.isfile("stylesheets.qss"):
+        with open("stylesheets.qss", "r") as f:
+            ex.setStyleSheet(f.read())
+    if os.path.isfile("appearance.json"):
+        with open("appearance.json", "r") as f:
+            ap = json.load(f)
+        
+        app.setStyle(ap["style"])
+
     sys.exit(app.exec_())
