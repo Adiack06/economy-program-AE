@@ -1,5 +1,7 @@
 from constants import *
 from typing import Union
+import datetime
+from main import data
 
 class Building:
     def __init__(self, btype: int, size: int=None):
@@ -23,13 +25,9 @@ class Building:
     def employees(self) -> int:
         #annoying hack to make airports bought before some date
         if self.btype == AIRPORT:
-            ts = datetime.date.fromisoformat(self.timestamp)
+            ts = data["current_day"]
             if ts < datetime.date(2022, 10, 20):
-                employees = 6
-            else:
-                employees = self.building.employees()
-            
-        if self.btype == AIRPORT:
+                return 6            
             return self.size / 20
         return BUILDING_INFO[self.btype].employees
     
