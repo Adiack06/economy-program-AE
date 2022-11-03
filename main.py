@@ -39,11 +39,11 @@ class Transaction:
         else:
             return {"count": self.count, "building": self.building, "type": self.trans_type, "timestamp": self.timestamp}
 
-    def deserialise(object):
+    def deserialise(object, date):
         if object["type"] == TRANSACTION_MANUAL:
             return Transaction(object["type"], object["timestamp"], amount=object["amount"], comment=object["comment"])
         else:
-            return Transaction(object["type"], object["timestamp"], building=Building.deserialise(object["building"]), count=object["count"])
+            return Transaction(object["type"], object["timestamp"], building=Building.deserialise(object["building"], date), count=object["count"])
             
     def compute_amount(self) -> int:
         if self.trans_type == TRANSACTION_MANUAL:
@@ -77,13 +77,13 @@ if os.path.exists("economy.json"):
     with open("economy.json", "r") as f:
         raw_data = json.load(f)
         
+    data["current_day"] = datetime.date.fromisoformat(raw_data["current_day"])
     for reg in raw_data["regions"]:
         data["regions"][reg] = {"buildings": []}
         for b in raw_data["regions"][reg]["buildings"]:
-            data["regions"][reg]["buildings"].append(Building.deserialise(b))
+            data["regions"][reg]["buildings"].append(Building.deserialise(b, data["current_day"]))
             
-    data["transactions"] = [Transaction.deserialise(t) for t in raw_data["transactions"]]
-    data["current_day"] = datetime.date.fromisoformat(raw_data["current_day"])
+    data["transactions"] = [Transaction.deserialise(t, data["current_day"]) for t in raw_data["transactions"]]
 
 def serialise_all():
     ddata = data.copy()
@@ -391,7 +391,7 @@ class BuildingsTab(QtWidgets.QWidget):
             self.e_size.show()
             self.l_size.show()
             size = self.e_size.value()
-            building = Building(btype, size)
+            building = Building(btype, data["current_day"], size)
             if btype == HOUSE and not size in [1, 2, 4, 6]: # perhaps the size is not valid yet, let's just ignore that
                 self.l_compcost.setText("Invalid size")
                 self.l_compincome.setText("Invalid size")
@@ -399,8 +399,8 @@ class BuildingsTab(QtWidgets.QWidget):
         else:
             self.e_size.hide()
             self.l_size.hide()
-            building = Building(btype)
-            
+            building = Building(btype, data["current_day"])
+ 
         income = building.income() * count
         self.l_compcost.setText(format_money(building.cost() * count))
         self.l_compincome.setText(format_money(income))
@@ -420,9 +420,9 @@ class BuildingsTab(QtWidgets.QWidget):
 
         btype = self.type_selector.currentData()
         if btype == AIRPORT or btype == HOUSE:
-            building = Building(btype, self.e_size.value())
+            building = Building(btype, data["current_day"], self.e_size.value())
         else:
-            building = Building(btype)
+            building = Building(btype, data["current_day"])
 
         count = self.e_count.value()
         if not building in self.buildings:

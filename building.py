@@ -1,12 +1,12 @@
 from constants import *
 from typing import Union
 import datetime
-from main import data
 
 class Building:
-    def __init__(self, btype: int, size: int=None):
+    def __init__(self, btype: int, date: datetime.date, size: int=None):
         self.btype = btype
         self.size = size
+        self.date = date
         
         if self.btype == AIRPORT or self.btype == HOUSE:
             assert self.size != None, "For airports and houses, the size must not be None"
@@ -25,8 +25,7 @@ class Building:
     def employees(self) -> int:
         #annoying hack to make airports bought before some date
         if self.btype == AIRPORT:
-            ts = data["current_day"]
-            if ts < datetime.date(2022, 10, 20):
+            if self.date < datetime.date(2022, 10, 20):
                 return 6            
             return self.size / 20
         return BUILDING_INFO[self.btype].employees
@@ -48,12 +47,12 @@ class Building:
         else: # else just a single int
             return self.btype
             
-    def deserialise(obj: Union[list[int, int], int]):
+    def deserialise(obj: Union[list[int, int], int], date: datetime.date):
         # serialised buildings are either a list of [type, size]
         if type(obj) == type([]):
-            return Building(obj[0], obj[1])
+            return Building(obj[0], date, obj[1])
         else: # or just a single int, being type
-            return Building(obj)
+            return Building(obj, date)
             
     def __hash__(self):
         return hash((self.btype, self.size))
