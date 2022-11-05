@@ -1,12 +1,12 @@
-#from matplotlib.backends.qt_compat import QtWidgets
-#from matplotlib.backends.backend_qtagg import (
-#    FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
-#from matplotlib.figure import Figure
+from matplotlib.backends.qt_compat import QtWidgets
+from matplotlib.backends.backend_qtagg import (
+    FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
+from matplotlib.figure import Figure
 # TODO
 # display bal after hypothetical buying thing
 # edit transactions
 
-from PyQt5 import QtCore, Qt, QtGui, QtWidgets
+from PyQt5 import QtCore, Qt, QtGui
 import sys
 import json
 import traceback
@@ -73,17 +73,22 @@ def wrapped_default(self, obj):
 wrapped_default.default = json.JSONEncoder().default
 json.JSONEncoder.default = wrapped_default
 
-if os.path.exists("economy.json"):
-    with open("economy.json", "r") as f:
-        raw_data = json.load(f)
-        
-    data["current_day"] = datetime.date.fromisoformat(raw_data["current_day"])
+def deserialise_all(raw_data):
+    data = {"regions": {}, "current_day": datetime.date.fromisoformat(raw_data["current_day"])}
     for reg in raw_data["regions"]:
         data["regions"][reg] = {"buildings": []}
         for b in raw_data["regions"][reg]["buildings"]:
             data["regions"][reg]["buildings"].append(Building.deserialise(b, data["current_day"]))
             
     data["transactions"] = [Transaction.deserialise(t, data["current_day"]) for t in raw_data["transactions"]]
+    return data
+if os.path.exists("economy.json"):
+    with open("economy.json", "r") as f:
+        raw_data = json.load(f)
+        
+    data = deserialise_all(raw_data)
+    
+
 
 def serialise_all():
     ddata = data.copy()
@@ -95,6 +100,19 @@ def save():
     file_data = serialise_all()
     with open("economy.json", "w") as f:
         f.write(file_data)
+
+def get_historical_datas():
+    if not os.path.isdir("backups"):
+        return []
+    
+    datas = []
+    for fname in os.listdir("backups"):
+        with open(os.path.join("backups", fname), "r") as f:
+            raw_data = json.load(f)
+        
+        datas.append(deserialise_all(raw_data))
+        
+    return datas
 
 def format_date(date):
     return datetime.date.fromisoformat(date).strftime("%d/%m/%Y")
@@ -149,6 +167,13 @@ def calc_income(data):
     
     income = reduce_by(gross_income, employment)
     return income, regional_income
+
+def calc_bal(data):
+    bal = 0
+    for t in data["transactions"]:
+        bal += t.compute_amount()
+    
+    return bal
 
 class BuildingEntry(Qt.QObject):
     decrease = Qt.pyqtSignal()
@@ -570,6 +595,25 @@ class TransactionsTab(QtWidgets.QWidget):
         self.table.setItem(row, 1, QtWidgets.QTableWidgetItem(format_date(transaction.timestamp)))
         self.table.setItem(row, 2, QtWidgets.QTableWidgetItem(transaction.compute_comment()))
 
+def calc_series(datas, series):
+    if series == "Balance":
+        return [calc_bal(d) for d in datas]
+    elif series == "Income":
+        return [calc_income(d)[0] for d in datas]
+    elif series == "Expenditure":
+        vals = []
+        for d in datas:
+            vals.append(0)
+            for trans in datas["transactions"]:
+                if trans.timestamp == datas["current_day"].isoformat() and trans.compute_amount() < 0:
+                    vals[-1] += trans.compute_amount()
+        return vals
+    elif series == "Employment":
+        return [calc_employment(d)[0] * 100 for d in datas]
+    
+    elif series == "Time":
+        return [(d["current_day"] - datetime.date(2022, 10, 10)).days for d in datas]
+    
 class GraphControls(QtWidgets.QWidget):
     def __init__(self, figure, parent=None):
         super().__init__(parent)
@@ -586,8 +630,9 @@ class GraphControls(QtWidgets.QWidget):
         self.l_yaxis = QtWidgets.QLabel("Against...", self)
         
         self.b_plot = QtWidgets.QPushButton("Plot", self)
+        self.b_clear = QtWidgets.QPushButton("Clear", self)
         
-        self.graph_type.addItems(["Line graph", "Scatter graph", "Bar chart", "Pie chart"])
+        self.graph_type.addItems(["Line graph", "Scatter graph", "Pie chart"])# add: bar
         
         self.layout.addWidget(self.l_gtype)
         self.layout.addWidget(self.graph_type)
@@ -596,6 +641,7 @@ class GraphControls(QtWidgets.QWidget):
         self.layout.addWidget(self.l_yaxis)
         self.layout.addWidget(self.y_axis)
         self.layout.addWidget(self.b_plot)
+        self.layout.addWidget(self.b_clear)
         
         self.setLayout(self.layout)
         
@@ -603,38 +649,65 @@ class GraphControls(QtWidgets.QWidget):
         self.x_axis.activated[str].connect(lambda x: self.update())
         self.y_axis.activated[str].connect(lambda x: self.update())
         self.b_plot.clicked.connect(self.plot)
+        self.b_clear.clicked.connect(self.clear)
         
         self.update()
         
+    def clear(self):
+        self.ax.clear()
+        self.figure.canvas.draw()
+        
     def update(self):
         ty = self.graph_type.currentText()
+        itemx = self.x_axis.currentIndex()
+        itemy = self.y_axis.currentIndex()
         self.x_axis.clear()
         self.y_axis.clear()
         # TODO graph something of just one region
-        if ty == "Line graph":
+        if ty == "Line graph" or ty == "Scatter graph":
             self.x_axis.addItems(["Balance", "Income", "Expenditure", "Employment"])
             self.y_axis.addItems(["Time"])
             
-        elif ty == "Pie chart":
+        if ty == "Scatter graph":
+            self.y_axis.addItems(["Balance", "Income", "Expenditure", "Employment"])
+            
+        if ty == "Pie chart":
             self.x_axis.addItems(["Income", "Expenditure"])
             self.y_axis.addItems(["Region"])
             
-        elif ty == "Bar chart":
+        """elif ty == "Bar chart":
             self.x_axis.addItems(["Employment"])
-            self.y_axis.addItems(["Region"])
+            self.y_axis.addItems(["Region"])"""
+        
+        if itemx < self.x_axis.count():
+            self.x_axis.setCurrentIndex(itemx)
+            
+        if itemy < self.y_axis.count():
+            self.y_axis.setCurrentIndex(itemy)
     
     def plot(self):
         # TODO do it
         gtype = self.graph_type.currentText()
         xaxis = self.x_axis.currentText()
         yaxis = self.y_axis.currentText()
-        
+        if len(xaxis) < 1 or len(yaxis) < 1:
+            return
+            
         if gtype == "Pie chart":
             if xaxis == "Income" and yaxis == "Region":
                 _, regional_income = calc_income(data)
             
                 self.ax.pie(regional_income.values(), labels=regional_income.keys(), autopct='%1.1f%%', shadow=True, startangle=90)
             self.ax.axis('equal')
+        
+        elif gtype == "Line graph" or gtype == "Scatter graph":
+            datas = sorted(get_historical_datas(), key=lambda d: d["current_day"])
+            xvals = calc_series(datas, xaxis)
+            yvals = calc_series(datas, yaxis)
+            if gtype == "Line graph":
+                self.ax.plot(yvals, xvals)
+            else:
+                self.ax.scatter(yvals, xvals)
             
         self.figure.canvas.draw()
 
@@ -648,18 +721,18 @@ class StatsTab(QtWidgets.QWidget):
         self.layout = QtWidgets.QGridLayout(self)
         
         self.graph_layout = QtWidgets.QVBoxLayout()
-        #self.figure = Figure()
-        #self.canvas = FigureCanvas(self.figure)
-       # self.toolbar = NavigationToolbar(self.canvas, self)
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+        self.toolbar = NavigationToolbar(self.canvas, self)
         
-        #self.graph_layout.addWidget(self.toolbar)
-        #self.graph_layout.addWidget(self.canvas)
-        
-        #self.graph_controls = GraphControls(self.figure, self)
-                
-        #self.layout.addWidget(self.graph_controls, 4, 0)
-        #self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
-        #self.layout.setColumnStretch(1, 1)
+        self.graph_layout.addWidget(self.toolbar)
+        self.graph_layout.addWidget(self.canvas)
+
+        self.graph_controls = GraphControls(self.figure, self)
+
+        self.layout.addWidget(self.graph_controls, 4, 0)
+        self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
+        self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
         
 
@@ -714,15 +787,8 @@ class Main(QtWidgets.QWidget):
         self.recalc_income()
         self.l_date.setText("Current date: " + format_date(data["current_day"].isoformat()))
 
-    def calc_bal(self):
-        bal = 0
-        for t in data["transactions"]:
-            bal += t.compute_amount()
-        
-        return bal
-
     def recalc_balance(self):
-        bal = self.calc_bal()
+        bal = calc_bal(data)
         self.l_bal.setText("Balance: " + format_money(bal))
         
     def recalc_income(self):
@@ -740,7 +806,7 @@ class Main(QtWidgets.QWidget):
             comment="Income",
             amount=income,
         ))
-        bal = self.calc_bal()
+        bal = calc_bal(data)
         if bal < 0:
             self.transactions_tab.add_transaction(Transaction(
                 TRANSACTION_MANUAL,
