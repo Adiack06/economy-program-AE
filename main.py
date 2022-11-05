@@ -305,14 +305,14 @@ class BuildingsTab(QtWidgets.QWidget):
         
         self.e_count = QtWidgets.QSpinBox(self)
         self.e_count.setValue(1)
-        self.e_count.setMaximum(999)
+        self.e_count.setMaximum(99999)
         self.e_size  = QtWidgets.QSpinBox(self)
         self.e_size.setMaximum(999)
         self.e_size.hide()
         self.b_add   = QtWidgets.QPushButton("Add", self)
-        self.l_compcost = QtWidgets.QLineEdit(self)
-        self.l_compincome = QtWidgets.QLineEdit(self)
-        self.l_compemployees=QtWidgets.QLineEdit(self)
+        self.l_compcost = QtWidgets.QLabel(self)
+        self.l_compincome = QtWidgets.QLabel(self)
+        self.l_compemployees=QtWidgets.QLabel(self)
         
         self.l_btype = QtWidgets.QLabel("Building type")
         self.l_count = QtWidgets.QLabel("Count")
@@ -321,33 +321,39 @@ class BuildingsTab(QtWidgets.QWidget):
         self.l_employees=QtWidgets.QLabel("Employees")
         self.l_size  = QtWidgets.QLabel("Size")
         
+        self.l_proj_bal = QtWidgets.QLabel(self)
+        self.l_proj_income = QtWidgets.QLabel(self)
+        self.l_proj_employ = QtWidgets.QLabel(self)
+        
         self.spacer = QtWidgets.QLabel("", self)
         
         self.layout.addWidget(self.region_select, 0, 0)
-        self.layout.addWidget(self.e_newregion, 0, 1)
-        self.layout.addWidget(self.b_newregion, 0, 2)
-        self.layout.addWidget(self.b_delregion, 0, 3)
-        self.layout.addWidget(self.l_btype, 1, 0)
-        self.layout.addWidget(self.l_count, 1, 1)
-        self.layout.addWidget(self.l_income, 1, 2)
-        self.layout.addWidget(self.l_cost, 1, 3)
-        self.layout.addWidget(self.l_employees, 1, 4)
-        self.layout.addWidget(self.l_size, 1, 5)
+        self.layout.addWidget(self.e_newregion,   0, 1)
+        self.layout.addWidget(self.b_newregion,   0, 2)
+        self.layout.addWidget(self.b_delregion,   0, 3)
+        self.layout.addWidget(self.l_btype,       1, 0)
+        self.layout.addWidget(self.l_count,       1, 1)
+        self.layout.addWidget(self.l_income,      1, 2)
+        self.layout.addWidget(self.l_cost,        1, 3)
+        self.layout.addWidget(self.l_employees,   1, 4)
+        self.layout.addWidget(self.l_size,        1, 5)
         self.layout.addWidget(self.type_selector, 2, 0)
-        self.layout.addWidget(self.e_count, 2, 1)
-        self.layout.addWidget(self.l_compincome, 2, 2)
-        self.layout.addWidget(self.l_compcost, 2, 3)
+        self.layout.addWidget(self.e_count,       2, 1)
+        self.layout.addWidget(self.l_compincome,  2, 2)
+        self.layout.addWidget(self.l_compcost,    2, 3)
         self.layout.addWidget(self.l_compemployees, 2, 4)
-        self.layout.addWidget(self.e_size, 2, 5)
-        self.layout.addWidget(self.b_add, 2, 6)
-        self.layout.addWidget(self.building_list, 3, 0, 1, 7)
-        self.layout.addWidget(self.spacer, 4, 0, 1, 7)
-        self.layout.setRowStretch(4, 1)
+        self.layout.addWidget(self.e_size,        2, 5)
+        self.layout.addWidget(self.b_add,         2, 6)
+        
+        self.layout.addWidget(self.l_proj_bal,    3, 0)
+        self.layout.addWidget(self.l_proj_income, 3, 1)
+        self.layout.addWidget(self.l_proj_employ, 3, 2)
+        
+        self.layout.addWidget(self.building_list, 4, 0, 1, 7)
+        self.layout.addWidget(self.spacer,        5, 0, 1, 7)
+        self.layout.setRowStretch(5, 1)
         self.setLayout(self.layout)
         
-        self.l_compcost.setReadOnly(True)
-        self.l_compincome.setReadOnly(True)
-        self.l_compemployees.setReadOnly(True)
         self.type_selector.activated[str].connect(lambda t: self.recalc_preview())
         self.e_count.valueChanged[int].connect(lambda n: self.recalc_preview())
         self.e_size.valueChanged[int].connect(lambda s: self.recalc_preview())
@@ -356,8 +362,8 @@ class BuildingsTab(QtWidgets.QWidget):
         self.b_delregion.clicked.connect(self.del_region)
         self.region_select.activated[str].connect(lambda r: self.region_change())
         self.building_list.building_count_decrease[BuildingEntry].connect(self.remove_building)
-        self.recalc_preview()
         self.region_change()
+        self.recalc_preview()
         
     def add_region(self):
         region = self.e_newregion.text()
@@ -409,6 +415,8 @@ class BuildingsTab(QtWidgets.QWidget):
         for building, count in building_nums.items():
             self.building_list.add_building(building, count)
         
+        self.recalc_preview()
+        
     def recalc_preview(self):
         btype = self.type_selector.currentData()
         count = self.e_count.value()
@@ -430,6 +438,25 @@ class BuildingsTab(QtWidgets.QWidget):
         self.l_compcost.setText(format_money(building.cost() * count))
         self.l_compincome.setText(format_money(income))
         self.l_compemployees.setText(str(round(building.employees() * count, 3)))
+        
+        if self.curr_region == "Total":
+            self.l_proj_bal.hide()
+            self.l_proj_income.hide()
+            self.l_proj_employ.hide()
+            return
+            
+        self.l_proj_bal.show()
+        self.l_proj_income.show()
+        self.l_proj_employ.show()
+        for i in range(count):
+            data["regions"][self.curr_region]["buildings"].append(building)
+                
+        self.l_proj_bal.setText("Projected bal: " + format_money(calc_bal(data) - building.cost() * count))
+        self.l_proj_income.setText("Projected income: " + format_money(calc_income(data)[0]))
+        self.l_proj_employ.setText("Projected employment: " + str(round(calc_employment(data)[0] * 100, 1)) + "%")
+        
+        for i in range(count):
+            data["regions"][self.curr_region]["buildings"].pop()
     
     def check_real_region(self):
         """check the current region is not 'Total'. If it is, warn the user
@@ -555,7 +582,7 @@ class TransactionsTab(QtWidgets.QWidget):
             row = self.table.currentRow()
             t = data["transactions"][row]
             if t.trans_type != TRANSACTION_MANUAL:
-                return
+                pass#return
 
             cont = QtWidgets.QMessageBox.question(self, "Really delete transaction?", "Really delete transaction?")
             if cont == QtWidgets.QMessageBox.No:
@@ -604,9 +631,9 @@ def calc_series(datas, series):
         vals = []
         for d in datas:
             vals.append(0)
-            for trans in datas["transactions"]:
-                if trans.timestamp == datas["current_day"].isoformat() and trans.compute_amount() < 0:
-                    vals[-1] += trans.compute_amount()
+            for trans in d["transactions"]:
+                if trans.timestamp == d["current_day"].isoformat() and trans.compute_amount() < 0:
+                    vals[-1] -= trans.compute_amount()
         return vals
     elif series == "Employment":
         return [calc_employment(d)[0] * 100 for d in datas]
@@ -632,7 +659,7 @@ class GraphControls(QtWidgets.QWidget):
         self.b_plot = QtWidgets.QPushButton("Plot", self)
         self.b_clear = QtWidgets.QPushButton("Clear", self)
         
-        self.graph_type.addItems(["Line graph", "Scatter graph", "Pie chart"])# add: bar
+        self.graph_type.addItems(["Line graph", "Scatter graph", "Pie chart", "Bar chart"])
         
         self.layout.addWidget(self.l_gtype)
         self.layout.addWidget(self.graph_type)
@@ -672,12 +699,12 @@ class GraphControls(QtWidgets.QWidget):
             self.y_axis.addItems(["Balance", "Income", "Expenditure", "Employment"])
             
         if ty == "Pie chart":
-            self.x_axis.addItems(["Income", "Expenditure"])
+            self.x_axis.addItems(["Income"])
             self.y_axis.addItems(["Region"])
             
-        """elif ty == "Bar chart":
+        elif ty == "Bar chart":
             self.x_axis.addItems(["Employment"])
-            self.y_axis.addItems(["Region"])"""
+            self.y_axis.addItems(["Region"])
         
         if itemx < self.x_axis.count():
             self.x_axis.setCurrentIndex(itemx)
@@ -708,6 +735,11 @@ class GraphControls(QtWidgets.QWidget):
                 self.ax.plot(yvals, xvals)
             else:
                 self.ax.scatter(yvals, xvals)
+        
+        elif gtype == "Bar chart":
+            if xaxis == "Employment" and yaxis == "Region":
+                _, regional_employment = calc_employment(data)
+                self.ax.bar(regional_employment.keys(), list(map(lambda n: n * 100, regional_employment.values())))
             
         self.figure.canvas.draw()
 
