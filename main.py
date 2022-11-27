@@ -639,7 +639,7 @@ def calc_series(datas, series):
         return [calc_employment(d)[0] * 100 for d in datas]
     
     elif series == "Time":
-        return [(d["current_day"] - datetime.date(2022, 10, 10)).days for d in datas]
+        return [i for i, d in enumerate(datas)]
     
 class GraphControls(QtWidgets.QWidget):
     def __init__(self, figure, parent=None):
