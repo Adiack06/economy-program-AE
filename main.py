@@ -794,8 +794,10 @@ class Main(QtWidgets.QWidget):
         self.layout.addWidget(self.tab_widget)
         
         self.bottom_layout = QtWidgets.QHBoxLayout()
-        self.b_next_day = QtWidgets.QPushButton("New day", self)
-        self.b_next_day.clicked.connect(self.next_day)
+        self.b_update_day = QtWidgets.QPushButton("Update day", self)
+        self.b_get_paid = QtWidgets.QPushButton("Get paid", self)
+        self.b_update_day.clicked.connect(self.update_day)
+        self.b_get_paid.clicked.connect(self.get_paid)
 
         self.l_bal = QtWidgets.QLabel(self)
         self.l_income = QtWidgets.QLabel(self)
@@ -806,7 +808,8 @@ class Main(QtWidgets.QWidget):
         self.bottom_layout.addWidget(self.l_income)
         self.bottom_layout.addWidget(self.l_employment)
         self.bottom_layout.addWidget(self.l_date)
-        self.bottom_layout.addWidget(self.b_next_day)
+        self.bottom_layout.addWidget(self.b_update_day)
+        self.bottom_layout.addWidget(self.b_get_paid)
         
         self.layout.addLayout(self.bottom_layout)
         
@@ -831,6 +834,10 @@ class Main(QtWidgets.QWidget):
         self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
         
     def get_paid(self):
+        for n in data["transactions"][::-1]:
+            if n.comment == "Income" and n.timestamp == data["current_day"].isoformat():
+                send_info_popup("YE CANNAE FOCKEN DAE THAT M8\n(you can only get paid once per day)")
+                return
         income, regional_income = calc_income(data)
         self.transactions_tab.add_transaction(Transaction(
             TRANSACTION_MANUAL,
@@ -847,7 +854,7 @@ class Main(QtWidgets.QWidget):
                 amount=bal * 0.25,
             ))
 
-    def next_day(self):
+    def update_day(self):
         save()
         if os.path.exists("backups") and os.path.isfile("backups"):
             raise MoronException("You absolute idiot, you made a file called 'backups', that's where I want to store my backups! Please delete or rename it")
@@ -862,8 +869,7 @@ class Main(QtWidgets.QWidget):
         with open(os.path.join("backups", data["current_day"].isoformat() + ".json"), "w") as f:
             f.write(text_data)
             
-        data["current_day"] += datetime.timedelta(days=1)
-        self.get_paid()
+        data["current_day"] = datetime.datetime.now().date()
         save()
 
 def exception_hook(exctype, value, tb):
