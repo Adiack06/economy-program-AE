@@ -47,7 +47,7 @@ BUILDING_INFO = {
     LARGE_FACTORY         : BuildingInfo(15.5,  12,    19344.00, "Large Factory"),
     FARMING               : BuildingInfo(18.5,  1/162, 11.9,     "Farming per block"),
     NAVAL_DOCKYARD        : BuildingInfo(15.5,  1,     1612.00,  "Naval dockyard per 7 blocks"),
-    MILLS                 : BuildingInfo(12,    0,     25500.00, "MiLLs"),
+    MILLS                 : BuildingInfo(0,     12,    25500.00, "MiLLs"),
     AIRBASE               : BuildingInfo(17.5,  4,     7280.00,  "Airbase"),
     SUPPLY_HUB            : BuildingInfo(10.5,  1,     1092.00,  "Supply hub"),
     REACTOR               : BuildingInfo(20.5,  3,     6396.00,  "Nuclear/biogas reactor"),
