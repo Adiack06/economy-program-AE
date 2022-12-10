@@ -111,7 +111,8 @@ def get_historical_datas():
             raw_data = json.load(f)
         
         datas.append(deserialise_all(raw_data))
-        
+    
+    datas.append(data)
     return datas
 
 def format_date(date):
@@ -852,7 +853,7 @@ class Main(QtWidgets.QWidget):
                 TRANSACTION_MANUAL,
                 data["current_day"].isoformat(),
                 comment="Debt interest",
-                amount=bal * 0.25,
+                amount=bal * 0.125,
             ))
 
     def update_day(self, delta=None):
