@@ -22,6 +22,8 @@ REACTOR               = 18
 ELECTRICAL_GENERATION = 19
 AIRPORT               = 20
 HOUSE                 = 21
+OFFICE                = 22
+METRO_STATION         = 23
 
 TRANSACTION_MANUAL = 1
 TRANSACTION_BUY    = 2
@@ -54,5 +56,7 @@ BUILDING_INFO = {
     ELECTRICAL_GENERATION : BuildingInfo(12.5,  2,     2600.00,  "Electrical generation/storage"),
     AIRPORT               : BuildingInfo(18,    0,     69,       "Airport"),
     HOUSE                 : BuildingInfo(0,     0,     69420,    "House"),
+    OFFICE                : BuildingInfo(18,    1,     1872.00,  "Office"),
+    METRO_STATION         : BuildingInfo(12.9,  1,     1341.60,  "Metro Station")
 }
 
