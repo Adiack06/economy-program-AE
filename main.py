@@ -64,7 +64,8 @@ class Transaction:
 data = {
     "regions": {},
     "transactions": [Transaction(TRANSACTION_MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance")],
-    "current_day": datetime.date(2022, 10, 10)
+    "current_day": datetime.date(2022, 10, 10),
+    "loans": [],
 }
 
 # hack to make json serialise my types properly lmao
@@ -81,7 +82,9 @@ def deserialise_all(raw_data):
             data["regions"][reg]["buildings"].append(Building.deserialise(b, data["current_day"]))
             
     data["transactions"] = [Transaction.deserialise(t, data["current_day"]) for t in raw_data["transactions"]]
+    data["loans"] = raw_data.get("loans", [])
     return data
+
 if os.path.exists("economy.json"):
     with open("economy.json", "r") as f:
         raw_data = json.load(f)
@@ -499,7 +502,7 @@ class BuildingsTab(QtWidgets.QWidget):
         if not self.check_real_region():
             return
 
-        count, ok = QtWidgets.QInputDialog.getInt(self, "Sell building", "How many do you want to sell?", 1, 1, entry.count)
+        count, ok = QtWidgets.QInputDialog.getInt(self, "Sell building", "How many " + entry.building.name() + "s do you want to sell?", 1, 1, entry.count)
         if not ok:
             return
         
@@ -767,11 +770,129 @@ class StatsTab(QtWidgets.QWidget):
         self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
         self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
-        
 
-class PriceTab(QtWidgets.QWidget):
+class LoansTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.parent = parent
+
+        self.layout = QtWidgets.QGridLayout(self)
+        
+        self.e_amount = QtWidgets.QSpinBox(self)
+        self.e_amount.setMaximum(999999999)
+        self.l_amount = QtWidgets.QLabel("Amount", self)
+        self.b_un = QtWidgets.QCheckBox("UN loan", self)
+        self.e_interest_rate = QtWidgets.QDoubleSpinBox(self)
+        self.l_interest_rate = QtWidgets.QLabel("Interest Rate (%)", self)
+        self.e_name = QtWidgets.QLineEdit(self)
+        self.l_name = QtWidgets.QLabel("Name", self)
+        self.b_get_loan = QtWidgets.QPushButton("Add loan", self)
+
+        self.ongoing_loans = QtWidgets.QGridLayout()
+        self.spacer = QtWidgets.QLabel("")
+
+        self.layout.addWidget(self.l_amount, 0, 0)
+        self.layout.addWidget(self.e_amount, 1, 0)
+        self.layout.addWidget(self.b_un,     1, 1)
+        self.layout.addWidget(self.l_interest_rate, 0, 2)
+        self.layout.addWidget(self.e_interest_rate, 1, 2)
+        self.layout.addWidget(self.l_name, 0, 3)
+        self.layout.addWidget(self.e_name, 1, 3)
+        self.layout.addWidget(self.b_get_loan, 1, 4)
+        self.layout.addLayout(self.ongoing_loans, 4, 0, 1, 5)
+        self.layout.addWidget(self.spacer, 5, 0, 1, 5)
+        self.layout.setRowStretch(5, 1)
+
+        self.setLayout(self.layout)
+
+        self.b_un.clicked.connect(self.un_loan)
+        self.b_get_loan.clicked.connect(self.get_loan)
+        self.loans = []
+        self.ongoing_loans.addWidget(QtWidgets.QLabel("Amount due for payback"), 0, 0)
+        self.ongoing_loans.addWidget(QtWidgets.QLabel("Interest rate"), 0, 1)
+        self.ongoing_loans.addWidget(QtWidgets.QLabel("Lender name"), 0, 2)
+        self.curr_row = 1
+
+        self.update_loan_widgets()
+
+    def un_loan(self):
+        if self.b_un.isChecked():
+            self.e_interest_rate.setEnabled(False)
+            self.e_interest_rate.setValue(UN_LOAN_INTEREST * 100)
+            self.e_name.setEnabled(False)
+            self.e_name.setText("UN")
+        else:
+            self.e_interest_rate.setEnabled(True)
+            self.e_name.setEnabled(True)
+
+    def get_loan(self):
+        data["loans"].append([self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), 0])
+        self.add_loan_widgets(data["loans"][-1])
+        self.parent.transactions_tab.add_transaction(Transaction(
+            TRANSACTION_MANUAL,
+            data["current_day"].isoformat(),
+            comment="Loan from " + self.e_name.text(),
+            amount=self.e_amount.value(),
+        ))
+        save()
+
+    def make_payment(self, pos, loan):
+        amount, ok = QtWidgets.QInputDialog.getDouble(self, "Make loan payment", "How much would you like to pay?", 0, 1, loan[0], 2)
+        if not ok:
+            return
+
+        self.parent.transactions_tab.add_transaction(Transaction(
+            TRANSACTION_MANUAL,
+            data["current_day"].isoformat(),
+            comment="Loan payment to " + loan[2],
+            amount=-amount
+        ))
+
+        # this is stupid
+        idx = -1
+        for i, l in enumerate(data["loans"]):
+            if l[1] == loan[1] and l[2] == loan[2]:
+                idx = i
+                break
+        if idx == -1:
+            raise MoronException("For some reason the loan you tried to pay off wasn't found in your total loan list. big but report to jams plz")
+        data["loans"][idx][3] += amount
+        data["loans"][idx][0] -= amount
+        if data["loans"][idx][0] < 0.01:
+            if data["loans"][idx][2] != "UN":
+                to_pay_other = data["loans"][idx][3]
+                send_info_popup("You paid a total of " + format_money(to_pay_other) + " to " + data["loans"][idx][2])
+            data["loans"].pop(idx)
+            self.update_loan_widgets()
+        else:
+            self.loans[pos][0].setText(str(data["loans"][idx][0]))
+        save()
+
+    def add_loan_widgets(self, loan):
+        self.loans.append((
+            QtWidgets.QLabel(format_money(loan[0])),
+            QtWidgets.QLabel(str(round(loan[1], 2)) + "%"),
+            QtWidgets.QLabel(loan[2]),
+            QtWidgets.QPushButton("Make payment")
+        ))
+        l = len(self.loans)
+        self.loans[-1][3].clicked.connect(lambda: self.make_payment(l - 1, loan))
+
+        for col, w in enumerate(self.loans[-1]):
+            self.ongoing_loans.addWidget(w, self.curr_row, col)
+
+        self.curr_row += 1
+
+    def update_loan_widgets(self):
+        for row in self.loans:
+            for w in row:
+                self.ongoing_loans.removeWidget(w)
+        self.loans.clear()
+
+        self.curr_row = 1
+
+        for loan in data["loans"]:
+            self.add_loan_widgets(loan)
 
 class Main(QtWidgets.QWidget):
     def __init__(self):
@@ -786,12 +907,13 @@ class Main(QtWidgets.QWidget):
         self.stats_tab = StatsTab(self)
         self.transactions_tab = TransactionsTab(self)
         self.buildings_tab = BuildingsTab(self)
+        self.loans_tab = LoansTab(self)
         
         self.tab_widget = QtWidgets.QTabWidget(self)
         self.tab_widget.addTab(self.buildings_tab, "Buildings")
         self.tab_widget.addTab(self.transactions_tab, "Transactions")
         self.tab_widget.addTab(self.stats_tab, "Stats")
-        self.tab_widget.addTab(PriceTab(self), "Price")
+        self.tab_widget.addTab(self.loans_tab, "Loans")
         self.layout.addWidget(self.tab_widget)
         
         self.bottom_layout = QtWidgets.QHBoxLayout()
@@ -852,9 +974,14 @@ class Main(QtWidgets.QWidget):
             self.transactions_tab.add_transaction(Transaction(
                 TRANSACTION_MANUAL,
                 data["current_day"].isoformat(),
-                comment="Debt interest",
-                amount=bal * 0.125,
+                comment="Overdraft interest",
+                amount=bal * OVERDRAFT_INTEREST,
             ))
+
+    def calc_loans(self):
+        for loan in data["loans"]:
+            loan[0] *= loan[1] / 100 + 1
+        self.loans_tab.update_loan_widgets()
 
     def update_day(self, delta=None):
         save()
@@ -876,6 +1003,7 @@ class Main(QtWidgets.QWidget):
         else:
             data["current_day"] += datetime.timedelta(days=delta)
         self.get_paid()
+        self.calc_loans()
         self.recalculate()
         save()
 

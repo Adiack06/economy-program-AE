@@ -32,6 +32,8 @@ TRANSACTION_INCOME = 4
 
 ROI = 13
 MONEY_PREFIX = "UN$"
+UN_LOAN_INTEREST = 0.20
+OVERDRAFT_INTEREST = 0.30
 
 BUILDING_INFO = {
     RAILWAY_STATION       : BuildingInfo(13.5,  2,     2808,     "Railway Station"),
