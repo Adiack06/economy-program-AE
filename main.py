@@ -2,11 +2,13 @@ from matplotlib.backends.qt_compat import QtWidgets
 from matplotlib.backends.backend_qtagg import (
     FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
 from matplotlib.figure import Figure
+from matplotlib import pyplot as plt
 # TODO
 # display bal after hypothetical buying thing
 # edit transactions
 
 from PyQt5 import QtCore, Qt, QtGui
+import numpy as np
 import sys
 import json
 import traceback
@@ -144,29 +146,20 @@ def calc_population(data):
     
     return total_people, regions
 
-
 def calc_employment(data):
     """Return (total, regional) employment calculated given some data"""
     regions = {}
     total_jobs = 0
-    pop, regional_pop = calc_population(data)
+    pop, _ = calc_population(data)
     for region in data["regions"]:
-        jobs = 0
         for building in data["regions"][region]["buildings"]:
             if building.btype != HOUSE:
-                jobs += building.employees()
-        
-        if regional_pop[region] == 0:
-            rate = 0
-        else:
-            rate = jobs / regional_pop[region]
-        regions[region] = rate
-        total_jobs += jobs
+                total_jobs += building.employees()
     
-    return total_jobs / pop if pop != 0 else 0, regions
+    return total_jobs / pop if pop != 0 else 0
 
 def calc_income(data):
-    employment, regional_employment = calc_employment(data)
+    employment = calc_employment(data)
     gross_income = 0
     regional_income = {}
     reduce_by = lambda i, p: i / p if p >= 1 else i * p
@@ -175,7 +168,7 @@ def calc_income(data):
         for building in data["regions"][region]["buildings"]:
             region_gross_income += building.income()
 
-        region_income = reduce_by(region_gross_income, regional_employment[region])
+        region_income = reduce_by(region_gross_income, employment)
         regional_income[region] = region_income
         gross_income += region_gross_income
     
@@ -188,6 +181,19 @@ def calc_bal(data):
         bal += t.compute_amount()
     
     return bal
+
+def calc_industry_income(data):
+    industries = {}
+    employ = calc_employment(data)
+    reduce_by = lambda i, p: i / p if p >= 1 else i * p
+    for region in data["regions"]:
+        for building in data["regions"][region]["buildings"]:
+            if building.btype != HOUSE:
+                if not building.name() in industries:
+                    industries[building.name()] = 0
+                industries[building.name()] += reduce_by(building.income(), employ)
+
+    return industries
 
 class BuildingEntry(Qt.QObject):
     decrease = Qt.pyqtSignal()
@@ -467,7 +473,7 @@ class BuildingsTab(QtWidgets.QWidget):
                 
         self.l_proj_bal.setText("Projected bal: " + format_money(calc_bal(data) - building.cost() * count))
         self.l_proj_income.setText("Projected income: " + format_money(calc_income(data)[0]))
-        self.l_proj_employ.setText("Projected employment: " + str(round(calc_employment(data)[0] * 100, 1)) + "%")
+        self.l_proj_employ.setText("Projected employment: " + str(round(calc_employment(data) * 100, 1)) + "%")
         
         for i in range(count):
             data["regions"][self.curr_region]["buildings"].pop()
@@ -652,7 +658,7 @@ def calc_series(datas, series):
                     vals[-1] -= trans.compute_amount()
         return vals
     elif series == "Employment":
-        return [calc_employment(d)[0] * 100 for d in datas]
+        return [calc_employment(d) * 100 for d in datas]
     
     elif series == "Time":
         return [i for i, d in enumerate(datas)]
@@ -675,7 +681,7 @@ class GraphControls(QtWidgets.QWidget):
         self.b_plot = QtWidgets.QPushButton("Plot", self)
         self.b_clear = QtWidgets.QPushButton("Clear", self)
         
-        self.graph_type.addItems(["Line graph", "Scatter graph", "Pie chart", "Bar chart"])
+        self.graph_type.addItems(["Line graph", "Scatter graph", "Pie chart"])
         
         self.layout.addWidget(self.l_gtype)
         self.layout.addWidget(self.graph_type)
@@ -716,11 +722,11 @@ class GraphControls(QtWidgets.QWidget):
             
         if ty == "Pie chart":
             self.x_axis.addItems(["Income", "Population"])
-            self.y_axis.addItems(["Region"])
+            self.y_axis.addItems(["Region", "Industry"])
             
-        elif ty == "Bar chart":
-            self.x_axis.addItems(["Employment"])
-            self.y_axis.addItems(["Region"])
+        # elif ty == "Bar chart":
+            # self.x_axis.addItems(["Employment"])
+            # self.y_axis.addItems(["Region"])
         
         if itemx < self.x_axis.count():
             self.x_axis.setCurrentIndex(itemx)
@@ -739,11 +745,21 @@ class GraphControls(QtWidgets.QWidget):
         if gtype == "Pie chart":
             if xaxis == "Income" and yaxis == "Region":
                 _, regional_income = calc_income(data)
-                self.ax.pie(regional_income.values(), labels=regional_income.keys(), autopct='%1.1f%%', shadow=True, startangle=90)
-            if xaxis == "Population" and yaxis == "Region":
+                values, labels = regional_income.values(), regional_income.keys()
+            elif xaxis == "Population" and yaxis == "Region":
                 _, regional_pop = calc_population(data)
-                self.ax.pie(regional_pop.values(), labels=regional_pop.keys(), autopct='%1.1f%%', shadow=True, startangle=90)
+                values, labels = regional_pop.values(), regional_pop.keys()
+            elif xaxis == "Income" and yaxis == "Industry":
+                ind = calc_industry_income(data)
+                values, labels = ind.values(), ind.keys()
+            else:
+                return # invalid configuration
 
+            values, labels = zip(*sorted(zip(values, labels), key=lambda i: i[0]))
+            cm = plt.get_cmap("plasma")
+            colours = [cm(i) for i in np.linspace(0, 1, len(vals))]
+
+            self.ax.pie(values, labels=labels, autopct='%1.1f%%', shadow=True, startangle=90, colors=colours)
             self.ax.axis('equal')
         
         elif gtype == "Line graph" or gtype == "Scatter graph":
@@ -755,10 +771,10 @@ class GraphControls(QtWidgets.QWidget):
             else:
                 self.ax.scatter(yvals, xvals)
         
-        elif gtype == "Bar chart":
-            if xaxis == "Employment" and yaxis == "Region":
-                _, regional_employment = calc_employment(data)
-                self.ax.bar(regional_employment.keys(), list(map(lambda n: n * 100, regional_employment.values())))
+        # elif gtype == "Bar chart":
+            # if xaxis == "Employment" and yaxis == "Region":
+                # _, regional_employment = calc_employment(data)
+                # self.ax.bar(regional_employment.keys(), list(map(lambda n: n * 100, regional_employment.values())))
             
         self.figure.canvas.draw()
 
@@ -781,8 +797,8 @@ class StatsTab(QtWidgets.QWidget):
 
         self.graph_controls = GraphControls(self.figure, self)
 
-        self.layout.addWidget(self.graph_controls, 4, 0)
-        self.layout.addLayout(self.graph_layout, 0, 1, 100, 1)
+        self.layout.addWidget(self.graph_controls, 0, 0, 1, 1)
+        self.layout.addLayout(self.graph_layout, 0, 1, 3, 1)
         self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
 
@@ -968,7 +984,7 @@ class Main(QtWidgets.QWidget):
         self.l_bal.setText("Balance: " + format_money(bal))
         
     def recalc_income(self):
-        employment, regional_employment = calc_employment(data)
+        employment = calc_employment(data)
         income, regional_income = calc_income(data)
 
         self.l_income.setText("Income: " + format_money(income))
