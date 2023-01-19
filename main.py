@@ -131,29 +131,39 @@ def send_info_popup(txt):
     msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
     msg.exec_()
 
-def calc_employment(data):
-    """Return (total, regional) employment calculated given some data"""
+def calc_population(data):
     regions = {}
     total_people = 0
-    total_jobs = 0
     for region in data["regions"]:
-        jobs = 0
         people = 0
         for building in data["regions"][region]["buildings"]:
             if building.btype == HOUSE:
-                people += building.size
-            else:
+                people += building.size        
+        regions[region] = people
+        total_people += people
+    
+    return total_people, regions
+
+
+def calc_employment(data):
+    """Return (total, regional) employment calculated given some data"""
+    regions = {}
+    total_jobs = 0
+    pop, regional_pop = calc_population(data)
+    for region in data["regions"]:
+        jobs = 0
+        for building in data["regions"][region]["buildings"]:
+            if building.btype != HOUSE:
                 jobs += building.employees()
         
-        if people == 0:
+        if regional_pop[region] == 0:
             rate = 0
         else:
-            rate = jobs / people
+            rate = jobs / regional_pop[region]
         regions[region] = rate
-        total_people += people
         total_jobs += jobs
     
-    return total_jobs / total_people if total_people != 0 else 0, regions
+    return total_jobs / pop if pop != 0 else 0, regions
 
 def calc_income(data):
     employment, regional_employment = calc_employment(data)
@@ -629,6 +639,8 @@ class TransactionsTab(QtWidgets.QWidget):
 def calc_series(datas, series):
     if series == "Balance":
         return [calc_bal(d) for d in datas]
+    elif series == "Population":
+        return [calc_population(d)[0] for d in datas]
     elif series == "Income":
         return [calc_income(d)[0] for d in datas]
     elif series == "Expenditure":
@@ -696,14 +708,14 @@ class GraphControls(QtWidgets.QWidget):
         self.y_axis.clear()
         # TODO graph something of just one region
         if ty == "Line graph" or ty == "Scatter graph":
-            self.x_axis.addItems(["Balance", "Income", "Expenditure", "Employment"])
+            self.x_axis.addItems(["Balance", "Income", "Expenditure", "Employment", "Population"])
             self.y_axis.addItems(["Time"])
             
         if ty == "Scatter graph":
-            self.y_axis.addItems(["Balance", "Income", "Expenditure", "Employment"])
+            self.y_axis.addItems(["Balance", "Income", "Expenditure", "Employment", "Population"])
             
         if ty == "Pie chart":
-            self.x_axis.addItems(["Income"])
+            self.x_axis.addItems(["Income", "Population"])
             self.y_axis.addItems(["Region"])
             
         elif ty == "Bar chart":
@@ -727,8 +739,11 @@ class GraphControls(QtWidgets.QWidget):
         if gtype == "Pie chart":
             if xaxis == "Income" and yaxis == "Region":
                 _, regional_income = calc_income(data)
-            
                 self.ax.pie(regional_income.values(), labels=regional_income.keys(), autopct='%1.1f%%', shadow=True, startangle=90)
+            if xaxis == "Population" and yaxis == "Region":
+                _, regional_pop = calc_population(data)
+                self.ax.pie(regional_pop.values(), labels=regional_pop.keys(), autopct='%1.1f%%', shadow=True, startangle=90)
+
             self.ax.axis('equal')
         
         elif gtype == "Line graph" or gtype == "Scatter graph":
@@ -865,7 +880,7 @@ class LoansTab(QtWidgets.QWidget):
             data["loans"].pop(idx)
             self.update_loan_widgets()
         else:
-            self.loans[pos][0].setText(str(data["loans"][idx][0]))
+            self.loans[pos][0].setText(format_money(data["loans"][idx][0]))
         save()
 
     def add_loan_widgets(self, loan):
@@ -925,11 +940,13 @@ class Main(QtWidgets.QWidget):
         self.l_bal = QtWidgets.QLabel(self)
         self.l_income = QtWidgets.QLabel(self)
         self.l_employment = QtWidgets.QLabel(self)
+        self.l_pop = QtWidgets.QLabel(self)
         self.l_date = QtWidgets.QLabel(self)
 
         self.bottom_layout.addWidget(self.l_bal)
         self.bottom_layout.addWidget(self.l_income)
         self.bottom_layout.addWidget(self.l_employment)
+        self.bottom_layout.addWidget(self.l_pop)
         self.bottom_layout.addWidget(self.l_date)
         self.bottom_layout.addWidget(self.b_next_day)
         self.bottom_layout.addWidget(self.b_update_day)
@@ -944,6 +961,7 @@ class Main(QtWidgets.QWidget):
         self.recalc_balance()
         self.recalc_income()
         self.l_date.setText("Current date: " + format_date(data["current_day"].isoformat()))
+        self.l_pop.setText("Population: " + str(calc_population(data)[0]))
 
     def recalc_balance(self):
         bal = calc_bal(data)
