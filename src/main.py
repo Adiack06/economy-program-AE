@@ -20,7 +20,9 @@ from typing import Union
 from building import *
 from constants import *
 
-MY_VERSION = "1.0.0"
+MY_VERSION = "1.0.1"
+BACKUP_DIR = os.path.join("..", "backups")
+ECONOMY_FILE = os.path.join("..", "economy.json")
 
 class Transaction:
     def __init__(self, ty, timestamp, *, comment=None, amount=None, building=None, count=None):
@@ -106,7 +108,7 @@ def serialise_all():
 
 def save():
     file_data = serialise_all()
-    with open("economy.json", "w") as f:
+    with open(ECONOMY_FILE, "w") as f:
         f.write(file_data)
 
 def get_historical_datas():
@@ -619,7 +621,7 @@ class TransactionsTab(QtWidgets.QWidget):
         try:
             amount = round(float(self.e_amount.text()), 2)
         except ValueError:
-            send_info_popup("Enter a valid number for the amount (without any $ or Â£)")
+            send_info_popup("Enter a valid number for the amount (without any $ or £)")
             return
         
         date = data["current_day"].isoformat()
@@ -1022,17 +1024,17 @@ class Main(QtWidgets.QWidget):
 
     def update_day(self, delta=None):
         save()
-        if os.path.exists("backups") and os.path.isfile("backups"):
+        if os.path.exists(BACKUP_DIR) and os.path.isfile(BACKUP_DIR):
             raise MoronException("You absolute idiot, you made a file called 'backups', that's where I want to store my backups! Please delete or rename it")
-        if not os.path.exists("backups"):
-            os.mkdir("backups")
+        if not os.path.exists(BACKUP_DIR):
+            os.mkdir(BACKUP_DIR)
         
         # Yes, this is a race condition or TOC/TOU bug
         # The truth is, I do not care, for it is exceedingly unlikely that anything could happen in between
         # also it wouldn't even matter that much it would just crash and save the progress anyway lmao
         
         text_data = serialise_all()
-        with open(os.path.join("backups", data["current_day"].isoformat() + ".json"), "w") as f:
+        with open(os.path.join(BACKUP_DIR, data["current_day"].isoformat() + ".json"), "w") as f:
             f.write(text_data)
             
         if delta is None:
@@ -1076,14 +1078,13 @@ def autoupdate():
         r = requests.get("http://cospox.com/eco/" + fname)
         if r.status_code != 200:
             return "GETting update file " + fname + ", status " + str(r.status_code)
-        with open(os.path.join("src", fname), "w") as f:
+        with open(fname, "w") as f:
             f.write(r.text)
     send_info_popup("Downloaded version " + vers_r.text + ". Restart to update.")
     sys.exit(0)
 
 if __name__ == '__main__':
     sys.excepthook = exception_hook
-    os.chdir("..")
     app = QtWidgets.QApplication(sys.argv)
     status = autoupdate()
     if status is not None:
