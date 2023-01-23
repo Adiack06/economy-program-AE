@@ -10,14 +10,19 @@ class Building:
         
         if self.btype == AIRPORT or self.btype == HOUSE:
             assert self.size != None, "For airports and houses, the size must not be None"
-    
-    def cost(self) -> float:
+    def lorentz(eco) -> float:
+        return (((eco / 1000) + 0.2)**0.425)/3 + 0.34
+
+    def cost(self, eco=None, l=None) -> float:
+        lorentz = Building.lorentz(eco) if eco is not None else l
         if self.btype == AIRPORT:
-            return ROI * self.income()
+            return ROI * self.income() * lorentz
         elif self.btype == HOUSE:
-            return {1: 1500, 2: 3000, 4: 6000, 6: 9000}[self.size]
+            return {1: 1500, 2: 3000, 4: 6000, 6: 9000}[self.size] * lorentz
+        elif self.btype != MILLS:
+            return BUILDING_INFO[self.btype].cost * lorentz
         else:
-            return BUILDING_INFO[self.btype].cost
+            return BUILDING_INFO[self.btype].cost # mils are exempt from relativistic pricing
     
     def wage(self) -> float:
         return BUILDING_INFO[self.btype].wage

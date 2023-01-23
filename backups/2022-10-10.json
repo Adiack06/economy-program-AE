@@ -1,1 +1,1 @@
-{"regions": {}, "transactions": [{"amount": 40000, "comment": "Initial balance", "type": 1, "timestamp": "2022-10-10"}, {"amount": 163, "comment": "Loan from UN", "type": 1, "timestamp": "2022-10-10"}], "current_day": "2022-10-10", "loans": [[163, 20.0, "UN", 0]]}
+{"regions": {"Buenos Aires": {"buildings": [[20, 100]]}}, "transactions": [{"amount": 40000, "comment": "Initial balance", "type": 1, "timestamp": "2022-10-10"}], "current_day": "2022-10-10"}

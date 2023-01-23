@@ -16,16 +16,27 @@ import os
 import datetime
 import re
 import requests
+sys.path.append("src")
 from typing import Union
 from building import *
 from constants import *
 
-MY_VERSION = "1.0.1"
-BACKUP_DIR = os.path.join("..", "backups")
-ECONOMY_FILE = os.path.join("..", "economy.json")
+MY_VERSION = "1.0.3"
+
+# really bad idea tbh
+# try to guess the location of economy.json
+# by looking at our cwd. if we're still in src
+# then it's in ..
+# else, assume it's in .
+if os.path.basename(os.getcwd()) == "src":
+    BACKUP_DIR = os.path.join("..", "backups")
+    ECONOMY_FILE = os.path.join("..", "economy.json")
+else:
+    BACKUP_DIR = "backups"
+    ECONOMY_FILE = "economy.json"
 
 class Transaction:
-    def __init__(self, ty, timestamp, *, comment=None, amount=None, building=None, count=None):
+    def __init__(self, ty, timestamp, *, comment=None, amount=None, building=None, count=None, lorentz=None):
         if ty == TRANSACTION_MANUAL:
             assert comment != None, "Comment on manual transaction must not be None"
             assert amount != None, "Amount on manual transaction must not be None"
@@ -33,6 +44,10 @@ class Transaction:
             assert building != None, "Building type on auto transaction must not be None"
             assert count != None, "Count on auto transaction must not be None"
 
+        if lorentz is None:
+            self.lorentz = 1
+        else:
+            self.lorentz = lorentz
         self.amount = amount
         self.comment = comment
         self.trans_type = ty
@@ -44,21 +59,21 @@ class Transaction:
         if self.trans_type == TRANSACTION_MANUAL:
             return {"amount": self.amount, "comment": self.comment, "type": self.trans_type, "timestamp": self.timestamp}
         else:
-            return {"count": self.count, "building": self.building, "type": self.trans_type, "timestamp": self.timestamp}
+            return {"count": self.count, "building": self.building, "type": self.trans_type, "timestamp": self.timestamp, "lorentz": self.lorentz}
 
     def deserialise(object, date):
         if object["type"] == TRANSACTION_MANUAL:
             return Transaction(object["type"], object["timestamp"], amount=object["amount"], comment=object["comment"])
         else:
-            return Transaction(object["type"], object["timestamp"], building=Building.deserialise(object["building"], date), count=object["count"])
+            return Transaction(object["type"], object["timestamp"], building=Building.deserialise(object["building"], date), count=object["count"], lorentz=object.get("lorentz"))
             
     def compute_amount(self) -> int:
         if self.trans_type == TRANSACTION_MANUAL:
             return self.amount
         elif self.trans_type == TRANSACTION_BUY:
-            return -self.building.cost() * self.count
+            return -self.building.cost(l=self.lorentz) * self.count
         elif self.trans_type == TRANSACTION_SELL:
-            return self.building.cost() * self.count
+            return self.building.cost(l=self.lorentz) * self.count
             
     def compute_comment(self):
         if self.trans_type == TRANSACTION_MANUAL:
@@ -74,6 +89,7 @@ data = {
     "current_day": datetime.date(2022, 10, 10),
     "loans": [],
 }
+
 
 # hack to make json serialise my types properly lmao
 def wrapped_default(self, obj):
@@ -92,8 +108,8 @@ def deserialise_all(raw_data):
     data["loans"] = raw_data.get("loans", [])
     return data
 
-if os.path.exists("economy.json"):
-    with open("economy.json", "r") as f:
+if os.path.exists(ECONOMY_FILE):
+    with open(ECONOMY_FILE, "r") as f:
         raw_data = json.load(f)
         
     data = deserialise_all(raw_data)
@@ -112,12 +128,12 @@ def save():
         f.write(file_data)
 
 def get_historical_datas():
-    if not os.path.isdir("backups"):
+    if not os.path.isdir(BACKUP_DIR):
         return []
     
     datas = []
-    for fname in os.listdir("backups"):
-        with open(os.path.join("backups", fname), "r") as f:
+    for fname in os.listdir(BACKUP_DIR):
+        with open(os.path.join(BACKUP_DIR, fname), "r") as f:
             raw_data = json.load(f)
         
         datas.append(deserialise_all(raw_data))
@@ -200,6 +216,8 @@ def calc_industry_income(data):
 
     return industries
 
+eco_cache = calc_income(data)[0]
+
 class BuildingEntry(Qt.QObject):
     decrease = Qt.pyqtSignal()
     def __init__(self, building, count, parent):
@@ -221,7 +239,7 @@ class BuildingEntry(Qt.QObject):
         self.update_count(self.count)
         
     def update_count(self, count):
-        self.l_cost.setText(format_money(self.building.cost() * count))
+        self.l_cost.setText(format_money(self.building.cost(eco_cache) * count))
         self.l_count.setText(str(count))
         self.l_income.setText(format_money(self.building.wage() * self.building.employees() * count * 8))
         self.l_employed.setText(str(round(self.building.employees() * count, 3)))
@@ -460,7 +478,7 @@ class BuildingsTab(QtWidgets.QWidget):
             building = Building(btype, data["current_day"])
  
         income = building.income() * count
-        self.l_compcost.setText(format_money(building.cost() * count))
+        self.l_compcost.setText(format_money(building.cost(eco_cache) * count))
         self.l_compincome.setText(format_money(income))
         self.l_compemployees.setText(str(round(building.employees() * count, 3)))
         
@@ -476,7 +494,7 @@ class BuildingsTab(QtWidgets.QWidget):
         for i in range(count):
             data["regions"][self.curr_region]["buildings"].append(building)
                 
-        self.l_proj_bal.setText("Projected bal: " + format_money(calc_bal(data) - building.cost() * count))
+        self.l_proj_bal.setText("Projected bal: " + format_money(calc_bal(data) - building.cost(eco_cache) * count))
         self.l_proj_income.setText("Projected income: " + format_money(calc_income(data)[0]))
         self.l_proj_employ.setText("Projected employment: " + str(round(calc_employment(data) * 100, 1)) + "%")
         
@@ -516,7 +534,8 @@ class BuildingsTab(QtWidgets.QWidget):
             TRANSACTION_BUY,
             data["current_day"].isoformat(),
             building=building,
-            count=count
+            count=count,
+            lorentz=Building.lorentz(eco_cache),
         ))
         
     def remove_building(self, entry: BuildingEntry):
@@ -553,6 +572,7 @@ class BuildingsTab(QtWidgets.QWidget):
                 data["current_day"].isoformat(),
                 building=building,
                 count=count,
+                lorentz=Building.lorentz(eco_cache)
             ))
         
         data["regions"][self.curr_region]["buildings"] = self.buildings
@@ -621,7 +641,7 @@ class TransactionsTab(QtWidgets.QWidget):
         try:
             amount = round(float(self.e_amount.text()), 2)
         except ValueError:
-            send_info_popup("Enter a valid number for the amount (without any $ or £)")
+            send_info_popup("Enter a valid number for the amount (without any $)")
             return
         
         date = data["current_day"].isoformat()
@@ -762,7 +782,7 @@ class GraphControls(QtWidgets.QWidget):
 
             values, labels = zip(*sorted(zip(values, labels), key=lambda i: i[0]))
             cm = plt.get_cmap("plasma")
-            colours = [cm(i) for i in np.linspace(0, 1, len(vals))]
+            colours = [cm(i) for i in np.linspace(0, 1, len(values))]
 
             self.ax.pie(values, labels=labels, autopct='%1.1f%%', shadow=True, startangle=90, colors=colours)
             self.ax.axis('equal')
@@ -989,9 +1009,11 @@ class Main(QtWidgets.QWidget):
         self.l_bal.setText("Balance: " + format_money(bal))
         
     def recalc_income(self):
+        global eco_cache
         employment = calc_employment(data)
         income, regional_income = calc_income(data)
-
+        eco_cache = income
+        
         self.l_income.setText("Income: " + format_money(income))
         self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
         
@@ -1078,7 +1100,7 @@ def autoupdate():
         r = requests.get("http://cospox.com/eco/" + fname)
         if r.status_code != 200:
             return "GETting update file " + fname + ", status " + str(r.status_code)
-        with open(fname, "w") as f:
+        with open(os.path.join("src", fname), "w", newline="") as f:
             f.write(r.text)
     send_info_popup("Downloaded version " + vers_r.text + ". Restart to update.")
     sys.exit(0)
