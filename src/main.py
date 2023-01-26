@@ -16,12 +16,13 @@ import os
 import datetime
 import re
 import requests
+import time # DEBUG
 sys.path.append("src")
 from typing import Union
 from building import *
 from constants import *
 
-MY_VERSION = "1.0.3"
+MY_VERSION = "1.1.3"
 
 # really bad idea tbh
 # try to guess the location of economy.json
@@ -36,52 +37,50 @@ else:
     ECONOMY_FILE = "economy.json"
 
 class Transaction:
-    def __init__(self, ty, timestamp, *, comment=None, amount=None, building=None, count=None, lorentz=None):
+    def __init__(self, ty, timestamp, *, comment=None, amount=None, buildings=None):
         if ty == TRANSACTION_MANUAL:
             assert comment != None, "Comment on manual transaction must not be None"
             assert amount != None, "Amount on manual transaction must not be None"
         else:
-            assert building != None, "Building type on auto transaction must not be None"
-            assert count != None, "Count on auto transaction must not be None"
+            assert buildings != None, "Buildings type on auto transaction must not be None"
 
-        if lorentz is None:
-            self.lorentz = 1
-        else:
-            self.lorentz = lorentz
         self.amount = amount
         self.comment = comment
         self.trans_type = ty
-        self.building = building
-        self.count = count
+        self.buildings = buildings
         self.timestamp = timestamp
     
     def serialise(self):
         if self.trans_type == TRANSACTION_MANUAL:
             return {"amount": self.amount, "comment": self.comment, "type": self.trans_type, "timestamp": self.timestamp}
         else:
-            return {"count": self.count, "building": self.building, "type": self.trans_type, "timestamp": self.timestamp, "lorentz": self.lorentz}
+            return {"buildings": self.buildings, "type": self.trans_type, "timestamp": self.timestamp}
 
     def deserialise(object, date):
         if object["type"] == TRANSACTION_MANUAL:
             return Transaction(object["type"], object["timestamp"], amount=object["amount"], comment=object["comment"])
         else:
-            return Transaction(object["type"], object["timestamp"], building=Building.deserialise(object["building"], date), count=object["count"], lorentz=object.get("lorentz"))
+            if object.get("buildings") == None: # old transaction, assume one building + count (+ lorentz)
+                buildings = [Building.deserialise(object["building"], date, lorentz=object.get("lorentz"))] * object["count"]
+                return Transaction(object["type"], object["timestamp"], buildings=buildings)
+            else: # new transaction, deserialise list of buildings with one lorentz each
+                return Transaction(object["type"], object["timestamp"], buildings=[Building.deserialise(i, date) for i in object["buildings"]])
             
     def compute_amount(self) -> int:
         if self.trans_type == TRANSACTION_MANUAL:
             return self.amount
         elif self.trans_type == TRANSACTION_BUY:
-            return -self.building.cost(l=self.lorentz) * self.count
+            return -sum([building.cost() for building in self.buildings])
         elif self.trans_type == TRANSACTION_SELL:
-            return self.building.cost(l=self.lorentz) * self.count
+            return sum([building.cost() for building in self.buildings])
             
     def compute_comment(self):
         if self.trans_type == TRANSACTION_MANUAL:
             return self.comment
         elif self.trans_type == TRANSACTION_BUY:
-            return f"Bought {self.count}x {self.building.name()}"
+            return f"Bought {len(self.buildings)}x {self.buildings[0].name()}"
         elif self.trans_type == TRANSACTION_SELL:
-            return f"Sold {self.count}x {self.building.name()}"
+            return f"Sold {len(self.buildings)}x {self.buildings[0].name()}"
 
 data = {
     "regions": {},
@@ -239,7 +238,7 @@ class BuildingEntry(Qt.QObject):
         self.update_count(self.count)
         
     def update_count(self, count):
-        self.l_cost.setText(format_money(self.building.cost(eco_cache) * count))
+        self.l_cost.setText(format_money(self.building.cost() * count))
         self.l_count.setText(str(count))
         self.l_income.setText(format_money(self.building.wage() * self.building.employees() * count * 8))
         self.l_employed.setText(str(round(self.building.employees() * count, 3)))
@@ -303,7 +302,7 @@ class BuildingList(QtWidgets.QWidget):
     def remove_building(self, building):
         item = None
         for n in self.items:
-            if n.building == building:
+            if n.building.is_roughly(building):
                 item = n
         if item != None:
             item.remove(self.layout)
@@ -313,7 +312,7 @@ class BuildingList(QtWidgets.QWidget):
 
     def update_building(self, building, count):
         for n in self.items:
-            if n.building == building:
+            if n.building.is_roughly(building):
                 n.update_count(count)
                 
     def clear(self):
@@ -449,13 +448,17 @@ class BuildingsTab(QtWidgets.QWidget):
         else:
             self.buildings = data["regions"][self.curr_region]["buildings"]
         
-        building_nums = {}
+        building_nums = []
         for building in self.buildings:
-            if not building in building_nums:
-                building_nums[building] = 0
-            building_nums[building] += 1
+            bid = (building.btype, building.size)
+            if not (building.btype, building.size) in [(b[0].btype, b[0].size) for b in building_nums]:
+                building_nums.append([building, 0])
+                idx = len(building_nums) - 1
+            else:
+                idx = [i for i, b in enumerate(building_nums) if b[0].is_roughly(building)][0]
+            building_nums[idx][1] += 1
         
-        for building, count in building_nums.items():
+        for building, count in building_nums:
             self.building_list.add_building(building, count)
         
         self.recalc_preview()
@@ -467,7 +470,7 @@ class BuildingsTab(QtWidgets.QWidget):
             self.e_size.show()
             self.l_size.show()
             size = self.e_size.value()
-            building = Building(btype, data["current_day"], size)
+            building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache), size)
             if btype == HOUSE and not size in [1, 2, 4, 6]: # perhaps the size is not valid yet, let's just ignore that
                 self.l_compcost.setText("Invalid size")
                 self.l_compincome.setText("Invalid size")
@@ -475,10 +478,10 @@ class BuildingsTab(QtWidgets.QWidget):
         else:
             self.e_size.hide()
             self.l_size.hide()
-            building = Building(btype, data["current_day"])
+            building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache))
  
         income = building.income() * count
-        self.l_compcost.setText(format_money(building.cost(eco_cache) * count))
+        self.l_compcost.setText(format_money(building.cost(l=Building.get_lorentz(eco_cache)) * count))
         self.l_compincome.setText(format_money(income))
         self.l_compemployees.setText(str(round(building.employees() * count, 3)))
         
@@ -494,7 +497,7 @@ class BuildingsTab(QtWidgets.QWidget):
         for i in range(count):
             data["regions"][self.curr_region]["buildings"].append(building)
                 
-        self.l_proj_bal.setText("Projected bal: " + format_money(calc_bal(data) - building.cost(eco_cache) * count))
+        self.l_proj_bal.setText("Projected bal: " + format_money(calc_bal(data) - building.cost(l=Building.get_lorentz(eco_cache)) * count))
         self.l_proj_income.setText("Projected income: " + format_money(calc_income(data)[0]))
         self.l_proj_employ.setText("Projected employment: " + str(round(calc_employment(data) * 100, 1)) + "%")
         
@@ -515,27 +518,25 @@ class BuildingsTab(QtWidgets.QWidget):
 
         btype = self.type_selector.currentData()
         if btype == AIRPORT or btype == HOUSE:
-            building = Building(btype, data["current_day"], self.e_size.value())
+            building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache), self.e_size.value())
         else:
-            building = Building(btype, data["current_day"])
+            building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache))
 
         count = self.e_count.value()
-        if not building in self.buildings:
+        if not (building.btype, building.size) in [(b.btype, b.size) for b in self.buildings]:
             self.building_list.add_building(building, 0)
         
         for i in range(count): # hack, just like clicking it multiple times lol
             self.buildings.append(building)
 
-        self.building_list.update_building(building, self.buildings.count(building))
+        self.building_list.update_building(building, len([1 for b in self.buildings if b.is_roughly(building)]))
         data["regions"][self.curr_region]["buildings"] = self.buildings
         save()
         
         self.parent.transactions_tab.add_transaction(Transaction(
             TRANSACTION_BUY,
             data["current_day"].isoformat(),
-            building=building,
-            count=count,
-            lorentz=Building.lorentz(eco_cache),
+            buildings=[building] * count,
         ))
         
     def remove_building(self, entry: BuildingEntry):
@@ -545,18 +546,21 @@ class BuildingsTab(QtWidgets.QWidget):
         count, ok = QtWidgets.QInputDialog.getInt(self, "Sell building", "How many " + entry.building.name() + "s do you want to sell?", 1, 1, entry.count)
         if not ok:
             return
-        
-        building = entry.building
-        for i in range(count): # TODO surely there's a better way than this
-            self.buildings.remove(building)
+
+        correct_types = [b for b in self.buildings if b.btype == entry.building.btype and b.size == entry.building.size]
+        correct_types = sorted(correct_types, key=lambda b: -b.lorentz)
+        buildings = []
+        for b in correct_types[:count]:
+            self.buildings.remove(b)
+            buildings.append(b)
         
         if entry.count <= count:
-            self.building_list.remove_building(building)
+            self.building_list.remove_building(buildings[0])
         else:
-            self.building_list.update_building(building, self.buildings.count(building))
+            self.building_list.update_building(buildings[0], len([1 for b in self.buildings if b.is_roughly(buildings[0])]))
 
         last_t = data["transactions"][-1]
-        if last_t.trans_type == TRANSACTION_BUY and last_t.building == building and last_t.count >= count:
+        if False and last_t.trans_type == TRANSACTION_BUY and last_t.building == building and last_t.count >= count:
             # update/cancel out last transaction instead
             if last_t.count == count:
                 # get rid entirely
@@ -570,13 +574,12 @@ class BuildingsTab(QtWidgets.QWidget):
             self.parent.transactions_tab.add_transaction(Transaction(
                 TRANSACTION_SELL,
                 data["current_day"].isoformat(),
-                building=building,
-                count=count,
-                lorentz=Building.lorentz(eco_cache)
+                buildings=buildings,
             ))
         
         data["regions"][self.curr_region]["buildings"] = self.buildings
         save()
+        self.recalc_preview()
 
 class KeybindTable(QtWidgets.QTableWidget):
     keyPressed = Qt.pyqtSignal(QtGui.QKeyEvent)
@@ -1083,34 +1086,106 @@ def exception_hook(exctype, value, tb):
     msg.exec_()
     sys.exit(1)
 
+class Updater(QtWidgets.QDialog):
+    def __init__(self):
+        super().__init__()
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.doing = QtWidgets.QLabel(self)
+        self.progress = QtWidgets.QProgressBar(self)
+        self.layout.addWidget(self.doing)
+        self.layout.addWidget(self.progress)
+        self.setLayout(self.layout)
 
-def autoupdate():
-    vers_r = requests.get("http://cospox.com/eco/version")
-    if vers_r.status_code != 200:
-        return "GETting version, status " + str(vers_r.status_code)
-    if vers_r.text.strip() == MY_VERSION:
-        # already up to date
-        return
+    def update(self):
+        self.progress.setMinimum(0)
+        self.progress.setMaximum(0)
+        self.uworker = UpdateWorker()
 
-    flist = requests.get("http://cospox.com/eco/files")
-    if flist.status_code != 200:
-        return "GETting file list, status " + str(flist.status_code)
+        self.uworker.progress_changed.connect(lambda prog: self.progress.setValue(prog))
+        self.uworker.progress_max.connect(lambda m: self.progress.setMaximum(m))
+        self.uworker.update_status.connect(lambda s: self.doing.setText(s))
+        self.uworker.result.connect(lambda res: self.update_done(res[0], res[1]))
+        self.uworker.start()
 
-    for fname in flist.text.strip().split(","):
-        r = requests.get("http://cospox.com/eco/" + fname)
-        if r.status_code != 200:
-            return "GETting update file " + fname + ", status " + str(r.status_code)
-        with open(os.path.join("src", fname), "w", newline="") as f:
-            f.write(r.text)
-    send_info_popup("Downloaded version " + vers_r.text + ". Restart to update.")
-    sys.exit(0)
+    def update_done(self, updated, msg):
+        if updated:
+            send_info_popup(msg)
+        elif msg is not None:
+            choice = QtWidgets.QMessageBox.warning(self, "Update Failed",
+                                   "Error updating: " + msg,
+                                   QtWidgets.QMessageBox.Retry | QtWidgets.QMessageBox.Ignore,
+                                   QtWidgets.QMessageBox.Retry)
+
+            if choice == QtWidgets.QMessageBox.Retry:
+                self.update()
+                return
+        self.done(updated)
+
+class UpdateWorker(QtCore.QThread):
+    progress_changed = Qt.pyqtSignal(int)
+    progress_max = Qt.pyqtSignal(int)
+    result = Qt.pyqtSignal(object)
+    update_status = Qt.pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+
+    def run(self):
+        res = self.autoupdate()
+        self.result.emit(res)
+    
+    def autoupdate(self):
+        self.update_status.emit("Checking for updates...")
+        try:
+            vers_r = requests.get("http://cospox.com/eco/version")
+        except Exception as e:
+            return False, "Getting version, other error " + str(e)
+        if vers_r.status_code != 200:
+            return False, "Getting version, status " + str(vers_r.status_code)
+        if vers_r.text.strip() == MY_VERSION:
+            # already up to date
+            return False, None
+
+        self.update_status.emit("Fetching file list...")
+        
+        try:
+            flist = requests.get("http://cospox.com/eco/files")
+        except Exception as e:
+            return False, "Getting file list, other error " + str(e)
+
+        if flist.status_code != 200:
+            return False, "Getting file list, status " + str(flist.status_code)
+
+        num_files = len(flist.text.strip().split(","))
+        self.progress_max.emit(num_files + 1)
+        val = 1
+        self.progress_changed.emit(val)
+
+        for fname in flist.text.strip().split(","):
+            self.update_status.emit("Downloading " + fname + " (" + str(val) + "/" + str(num_files - 1) + ")")
+            try:
+                r = requests.get("http://cospox.com/eco/" + fname)
+            except Exception as e:
+                return False, "Getting file " + fname + ", other error " + str(e)
+ 
+            if r.status_code != 200:
+                return False, "Getting update file " + fname + ", status " + str(r.status_code)
+            with open(os.path.join("src", fname), "w", newline="") as f:
+                f.write(r.text)
+
+            val += 1
+            self.progress_changed.emit(val)
+
+        return True, "Downloaded version " + vers_r.text + ". Restart program to update."
 
 if __name__ == '__main__':
+    import threading
     sys.excepthook = exception_hook
     app = QtWidgets.QApplication(sys.argv)
-    status = autoupdate()
-    if status is not None:
-        send_info_popup("Failed to check for updates: " + status)
+    updater = Updater()
+    updater.update()
+    if updater.exec():
+        sys.exit(0)
 
     ex = Main()
     if os.path.isfile("stylesheets.qss"):
