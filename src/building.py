@@ -45,7 +45,8 @@ class Building:
         if self.btype == AIRPORT:
             return str(self.size) + " block long airport"
         if self.btype == HOUSE:
-            return str(self.size) + " person house"
+            return {1: "One", 2: "Two", 4: "Four", 6: "Six"}[self.size] + " person house"
+        
         return BUILDING_INFO[self.btype].name
         
     def income(self) -> float:

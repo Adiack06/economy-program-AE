@@ -22,7 +22,7 @@ from typing import Union
 from building import *
 from constants import *
 
-MY_VERSION = "1.1.3"
+MY_VERSION = "1.2.0"
 
 # really bad idea tbh
 # try to guess the location of economy.json
@@ -731,7 +731,9 @@ class GraphControls(QtWidgets.QWidget):
         self.update()
         
     def clear(self):
-        self.ax.clear()
+        self.figure.clear()
+        self.ax = self.figure.subplots()
+        # self.ax.clear()
         self.figure.canvas.draw()
         
     def update(self):
@@ -1006,6 +1008,7 @@ class Main(QtWidgets.QWidget):
         self.recalc_income()
         self.l_date.setText("Current date: " + format_date(data["current_day"].isoformat()))
         self.l_pop.setText("Population: " + str(calc_population(data)[0]))
+        self.buildings_tab.recalc_preview()
 
     def recalc_balance(self):
         bal = calc_bal(data)
@@ -1048,6 +1051,13 @@ class Main(QtWidgets.QWidget):
         self.loans_tab.update_loan_widgets()
 
     def update_day(self, delta=None):
+        if delta is not None:
+            now = datetime.date.today()
+            next_day = data["current_day"] + datetime.timedelta(days=delta)
+            if next_day > now:
+                send_info_popup("Woah there buddy you aren't goint 88mph (you're trying to go into the future!)")
+                return
+
         save()
         if os.path.exists(BACKUP_DIR) and os.path.isfile(BACKUP_DIR):
             raise MoronException("You absolute idiot, you made a file called 'backups', that's where I want to store my backups! Please delete or rename it")
@@ -1063,7 +1073,7 @@ class Main(QtWidgets.QWidget):
             f.write(text_data)
             
         if delta is None:
-            data["current_day"] = datetime.datetime.now().date()
+            data["current_day"] = datetime.date.today()
         else:
             data["current_day"] += datetime.timedelta(days=delta)
         self.get_paid()
