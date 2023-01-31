@@ -166,17 +166,24 @@ def calc_population(data):
     
     return total_people, regions
 
-def calc_employment(data):
-    """Return (total, regional) employment calculated given some data"""
+def calc_jobs(data):
     regions = {}
     total_jobs = 0
-    pop, _ = calc_population(data)
     for region in data["regions"]:
+        jobs = 0
         for building in data["regions"][region]["buildings"]:
             if building.btype != HOUSE:
-                total_jobs += building.employees()
-    
-    return total_jobs / pop if pop != 0 else 0
+                jobs += building.employees()
+        regions[region] = jobs
+        total_jobs += jobs
+
+    return total_jobs, regions
+        
+
+def calc_employment(data):
+    pop, _ = calc_population(data)
+    jobs, _ = calc_jobs(data)
+    return jobs / pop if pop != 0 else 0
 
 def calc_income(data):
     employment = calc_employment(data)
@@ -462,6 +469,8 @@ class BuildingsTab(QtWidgets.QWidget):
             self.building_list.add_building(building, count)
         
         self.recalc_preview()
+
+        self.parent.recalc_regional_stats(self)
         
     def recalc_preview(self):
         btype = self.type_selector.currentData()
@@ -965,6 +974,46 @@ class Main(QtWidgets.QWidget):
     def init_gui(self):
         self.layout = QtWidgets.QVBoxLayout(self)
 
+       
+        
+        self.local_stats_layout = QtWidgets.QHBoxLayout()
+        self.global_stats_layout = QtWidgets.QHBoxLayout()
+        self.date_layout = QtWidgets.QHBoxLayout()
+        
+        self.b_update_day = QtWidgets.QPushButton("Update day to today's date", self)
+        self.b_next_day = QtWidgets.QPushButton("Next day", self)
+        self.b_update_day.clicked.connect(lambda: self.update_day())
+        self.b_next_day.clicked.connect(lambda: self.update_day(delta=1))
+
+        self.l_bal = QtWidgets.QLabel(self)
+        self.l_income = QtWidgets.QLabel(self)
+        self.l_employment = QtWidgets.QLabel(self)
+        self.l_pop = QtWidgets.QLabel(self)
+        self.l_jobs = QtWidgets.QLabel(self)
+        self.l_lorentz = QtWidgets.QLabel(self)
+        self.l_date = QtWidgets.QLabel(self)
+
+        self.l_regincome = QtWidgets.QLabel(self)
+        self.l_regpop = QtWidgets.QLabel(self)
+        self.l_regjobs = QtWidgets.QLabel(self)
+        self.l_regemploy = QtWidgets.QLabel(self)
+
+        self.local_stats_layout.addWidget(self.l_regincome)
+        self.local_stats_layout.addWidget(self.l_regemploy)
+        self.local_stats_layout.addWidget(self.l_regpop)
+        self.local_stats_layout.addWidget(self.l_regjobs)
+
+        self.global_stats_layout.addWidget(self.l_bal)
+        self.global_stats_layout.addWidget(self.l_income)
+        self.global_stats_layout.addWidget(self.l_employment)
+        self.global_stats_layout.addWidget(self.l_pop)
+        self.global_stats_layout.addWidget(self.l_jobs)
+        self.global_stats_layout.addWidget(self.l_lorentz)
+        
+        self.date_layout.addWidget(self.l_date)
+        self.date_layout.addWidget(self.b_next_day)
+        self.date_layout.addWidget(self.b_update_day)
+        
         self.stats_tab = StatsTab(self)
         self.transactions_tab = TransactionsTab(self)
         self.buildings_tab = BuildingsTab(self)
@@ -976,28 +1025,9 @@ class Main(QtWidgets.QWidget):
         self.tab_widget.addTab(self.stats_tab, "Stats")
         self.tab_widget.addTab(self.loans_tab, "Loans")
         self.layout.addWidget(self.tab_widget)
-        
-        self.bottom_layout = QtWidgets.QHBoxLayout()
-        self.b_update_day = QtWidgets.QPushButton("Update day to today's date", self)
-        self.b_next_day = QtWidgets.QPushButton("Next day", self)
-        self.b_update_day.clicked.connect(lambda: self.update_day())
-        self.b_next_day.clicked.connect(lambda: self.update_day(delta=1))
-
-        self.l_bal = QtWidgets.QLabel(self)
-        self.l_income = QtWidgets.QLabel(self)
-        self.l_employment = QtWidgets.QLabel(self)
-        self.l_pop = QtWidgets.QLabel(self)
-        self.l_date = QtWidgets.QLabel(self)
-
-        self.bottom_layout.addWidget(self.l_bal)
-        self.bottom_layout.addWidget(self.l_income)
-        self.bottom_layout.addWidget(self.l_employment)
-        self.bottom_layout.addWidget(self.l_pop)
-        self.bottom_layout.addWidget(self.l_date)
-        self.bottom_layout.addWidget(self.b_next_day)
-        self.bottom_layout.addWidget(self.b_update_day)
-        
-        self.layout.addLayout(self.bottom_layout)
+        self.layout.addLayout(self.local_stats_layout)
+        self.layout.addLayout(self.global_stats_layout)
+        self.layout.addLayout(self.date_layout)
         
         self.setLayout(self.layout)
         self.recalculate()
@@ -1008,8 +1038,41 @@ class Main(QtWidgets.QWidget):
         self.recalc_income()
         self.l_date.setText("Current date: " + format_date(data["current_day"].isoformat()))
         self.l_pop.setText("Population: " + str(calc_population(data)[0]))
+        self.l_jobs.setText("Jobs: " + str(round(calc_jobs(data)[0], 2)))
         self.buildings_tab.recalc_preview()
+        self.l_lorentz.setText("L: " + str(round(Building.get_lorentz(eco_cache), 4)))
+        self.recalc_regional_stats(self.buildings_tab)
+        
+    def recalc_regional_stats(self, buildings_tab):
+        if buildings_tab.curr_region == "Total":
+            # no regional stats
+            self.l_regincome.hide()
+            self.l_regemploy.hide()
+            self.l_regpop.hide()
+            self.l_regjobs.hide()
+        else:
+            _, reg_pop = calc_population(data)
+            _, reg_jobs = calc_jobs(data)
+            pop = reg_pop[buildings_tab.curr_region]
+            jobs = reg_jobs[buildings_tab.curr_region]
+            
+            if pop != 0:
+                employ_percent = jobs / pop * 100
+            else:
+                employ_percent = 0
 
+            _, regional_income = calc_income(data)
+            inc = regional_income[buildings_tab.curr_region]
+            
+            self.l_regincome.show()
+            self.l_regemploy.show()
+            self.l_regpop.show()
+            self.l_regjobs.show()
+            self.l_regincome.setText("Income (region): " + str(format_money(inc)))
+            self.l_regemploy.setText("Employment (region): " + str(round(employ_percent, 1)) + "%")
+            self.l_regpop.setText("Population (region): " + str(pop))
+            self.l_regjobs.setText("Jobs (region): " + str(round(jobs, 2)))
+            
     def recalc_balance(self):
         bal = calc_bal(data)
         self.l_bal.setText("Balance: " + format_money(bal))
@@ -1055,7 +1118,7 @@ class Main(QtWidgets.QWidget):
             now = datetime.date.today()
             next_day = data["current_day"] + datetime.timedelta(days=delta)
             if next_day > now:
-                send_info_popup("Woah there buddy you aren't goint 88mph (you're trying to go into the future!)")
+                send_info_popup("Woah there buddy you aren't goint 88mph\n(you're trying to go into the future!)")
                 return
 
         save()
