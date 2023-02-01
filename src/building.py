@@ -9,7 +9,7 @@ class Building:
         self.date = date
         self.lorentz = lorentz
         
-        if self.btype == AIRPORT or self.btype == HOUSE:
+        if self.btype == BType.AIRPORT or self.btype == BType.HOUSE:
             assert self.size != None, "For airports and houses, the size must not be None"
 
     def get_lorentz(eco) -> float:
@@ -21,11 +21,11 @@ class Building:
         else:
             lorentz = l
 
-        if self.btype == AIRPORT:
+        if self.btype == BType.AIRPORT:
             return ROI * self.income() * lorentz
-        elif self.btype == HOUSE:
+        elif self.btype == BType.HOUSE:
             return {1: 1500, 2: 3000, 4: 6000, 6: 9000}[self.size] * lorentz
-        elif self.btype != MILLS:
+        elif self.btype != BType.MILLS:
             return BUILDING_INFO[self.btype].cost * lorentz
         else:
             return BUILDING_INFO[self.btype].cost # mils are exempt from relativistic pricing
@@ -35,16 +35,16 @@ class Building:
     
     def employees(self) -> int:
         #annoying hack to make airports bought before some date
-        if self.btype == AIRPORT:
+        if self.btype == BType.AIRPORT:
             if self.date < datetime.date(2022, 10, 20):
                 return 6            
             return self.size / 20
         return BUILDING_INFO[self.btype].employees
     
     def name(self) -> str:
-        if self.btype == AIRPORT:
+        if self.btype == BType.AIRPORT:
             return str(self.size) + " block long airport"
-        if self.btype == HOUSE:
+        if self.btype == BType.HOUSE:
             return {1: "One", 2: "Two", 4: "Four", 6: "Six"}[self.size] + " person house"
         
         return BUILDING_INFO[self.btype].name

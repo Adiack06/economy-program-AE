@@ -21,8 +21,11 @@ sys.path.append("src")
 from typing import Union
 from building import *
 from constants import *
+from data import *
+from transaction import Transaction, TransactionType
+from building_list import BuildingList, BuildingEntry
 
-MY_VERSION = "1.2.0"
+MY_VERSION = "1.3.0"
 
 # really bad idea tbh
 # try to guess the location of economy.json
@@ -36,55 +39,9 @@ else:
     BACKUP_DIR = "backups"
     ECONOMY_FILE = "economy.json"
 
-class Transaction:
-    def __init__(self, ty, timestamp, *, comment=None, amount=None, buildings=None):
-        if ty == TRANSACTION_MANUAL:
-            assert comment != None, "Comment on manual transaction must not be None"
-            assert amount != None, "Amount on manual transaction must not be None"
-        else:
-            assert buildings != None, "Buildings type on auto transaction must not be None"
-
-        self.amount = amount
-        self.comment = comment
-        self.trans_type = ty
-        self.buildings = buildings
-        self.timestamp = timestamp
-    
-    def serialise(self):
-        if self.trans_type == TRANSACTION_MANUAL:
-            return {"amount": self.amount, "comment": self.comment, "type": self.trans_type, "timestamp": self.timestamp}
-        else:
-            return {"buildings": self.buildings, "type": self.trans_type, "timestamp": self.timestamp}
-
-    def deserialise(object, date):
-        if object["type"] == TRANSACTION_MANUAL:
-            return Transaction(object["type"], object["timestamp"], amount=object["amount"], comment=object["comment"])
-        else:
-            if object.get("buildings") == None: # old transaction, assume one building + count (+ lorentz)
-                buildings = [Building.deserialise(object["building"], date, lorentz=object.get("lorentz"))] * object["count"]
-                return Transaction(object["type"], object["timestamp"], buildings=buildings)
-            else: # new transaction, deserialise list of buildings with one lorentz each
-                return Transaction(object["type"], object["timestamp"], buildings=[Building.deserialise(i, date) for i in object["buildings"]])
-            
-    def compute_amount(self) -> int:
-        if self.trans_type == TRANSACTION_MANUAL:
-            return self.amount
-        elif self.trans_type == TRANSACTION_BUY:
-            return -sum([building.cost() for building in self.buildings])
-        elif self.trans_type == TRANSACTION_SELL:
-            return sum([building.cost() for building in self.buildings])
-            
-    def compute_comment(self):
-        if self.trans_type == TRANSACTION_MANUAL:
-            return self.comment
-        elif self.trans_type == TRANSACTION_BUY:
-            return f"Bought {len(self.buildings)}x {self.buildings[0].name()}"
-        elif self.trans_type == TRANSACTION_SELL:
-            return f"Sold {len(self.buildings)}x {self.buildings[0].name()}"
-
 data = {
     "regions": {},
-    "transactions": [Transaction(TRANSACTION_MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance")],
+    "transactions": [Transaction(TransactionType.MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance")],
     "current_day": datetime.date(2022, 10, 10),
     "loans": [],
 }
@@ -140,12 +97,6 @@ def get_historical_datas():
     datas.append(data)
     return datas
 
-def format_date(date):
-    return datetime.date.fromisoformat(date).strftime("%d/%m/%Y")
-
-def format_money(amt):
-    return MONEY_PREFIX + str(round(amt, 2))
-
 def send_info_popup(txt):
     msg = QtWidgets.QMessageBox()
     msg.setIcon(QtWidgets.QMessageBox.Information)
@@ -153,180 +104,9 @@ def send_info_popup(txt):
     msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
     msg.exec_()
 
-def calc_population(data):
-    regions = {}
-    total_people = 0
-    for region in data["regions"]:
-        people = 0
-        for building in data["regions"][region]["buildings"]:
-            if building.btype == HOUSE:
-                people += building.size        
-        regions[region] = people
-        total_people += people
-    
-    return total_people, regions
-
-def calc_jobs(data):
-    regions = {}
-    total_jobs = 0
-    for region in data["regions"]:
-        jobs = 0
-        for building in data["regions"][region]["buildings"]:
-            if building.btype != HOUSE:
-                jobs += building.employees()
-        regions[region] = jobs
-        total_jobs += jobs
-
-    return total_jobs, regions
-        
-
-def calc_employment(data):
-    pop, _ = calc_population(data)
-    jobs, _ = calc_jobs(data)
-    return jobs / pop if pop != 0 else 0
-
-def calc_income(data):
-    employment = calc_employment(data)
-    gross_income = 0
-    regional_income = {}
-    reduce_by = lambda i, p: i / p if p >= 1 else i * p
-    for region in data["regions"]:
-        region_gross_income = 0
-        for building in data["regions"][region]["buildings"]:
-            region_gross_income += building.income()
-
-        region_income = reduce_by(region_gross_income, employment)
-        regional_income[region] = region_income
-        gross_income += region_gross_income
-    
-    income = reduce_by(gross_income, employment)
-    return income, regional_income
-
-def calc_bal(data):
-    bal = 0
-    for t in data["transactions"]:
-        bal += t.compute_amount()
-    
-    return bal
-
-def calc_industry_income(data):
-    industries = {}
-    employ = calc_employment(data)
-    reduce_by = lambda i, p: i / p if p >= 1 else i * p
-    for region in data["regions"]:
-        for building in data["regions"][region]["buildings"]:
-            if building.btype != HOUSE:
-                if not building.name() in industries:
-                    industries[building.name()] = 0
-                industries[building.name()] += reduce_by(building.income(), employ)
-
-    return industries
 
 eco_cache = calc_income(data)[0]
 
-class BuildingEntry(Qt.QObject):
-    decrease = Qt.pyqtSignal()
-    def __init__(self, building, count, parent):
-        super().__init__()
-        self.building = building
-        self.count = count
-
-        self.l_type = QtWidgets.QLabel(building.name(), parent)
-        self.l_count = QtWidgets.QLabel(parent)
-        self.l_employed = QtWidgets.QLabel(parent)
-        self.l_income = QtWidgets.QLabel(parent)
-        self.l_cost = QtWidgets.QLabel(parent)
-        self.b_decrease = QtWidgets.QPushButton("-", parent)
-        
-        self.b_decrease.clicked.connect(lambda: self.decrease.emit())
-        width = self.b_decrease.fontMetrics().boundingRect("-").width() + 7
-        self.b_decrease.setMaximumWidth(width)
-        self.b_decrease.setMaximumHeight(width) # square
-        self.update_count(self.count)
-        
-    def update_count(self, count):
-        self.l_cost.setText(format_money(self.building.cost() * count))
-        self.l_count.setText(str(count))
-        self.l_income.setText(format_money(self.building.wage() * self.building.employees() * count * 8))
-        self.l_employed.setText(str(round(self.building.employees() * count, 3)))
-        self.count = count
-        
-    def remove(self, layout):
-        layout.removeWidget(self.l_type)
-        layout.removeWidget(self.l_count)
-        layout.removeWidget(self.l_employed)
-        layout.removeWidget(self.l_income)
-        layout.removeWidget(self.l_cost)
-        layout.removeWidget(self.b_decrease)
-        self.l_type.deleteLater()
-        self.l_count.deleteLater()
-        self.l_employed.deleteLater()
-        self.l_income.deleteLater()
-        self.l_cost.deleteLater()
-        self.b_decrease.deleteLater()
-        self.l_type = None
-        self.l_count = None
-        self.l_employed = None
-        self.l_income = None
-        self.l_cost = None
-        self.b_decrease = None
-        
-    def insert(self, layout, idx):
-        layout.addWidget(self.l_type, idx, 0)
-        layout.addWidget(self.l_count, idx, 1)
-        layout.addWidget(self.l_employed, idx, 2)
-        layout.addWidget(self.l_income, idx, 3)
-        layout.addWidget(self.l_cost, idx, 4)
-        layout.addWidget(self.b_decrease, idx, 5)
-
-class BuildingList(QtWidgets.QWidget):
-    building_count_decrease = Qt.pyqtSignal(BuildingEntry)
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.layout = QtWidgets.QGridLayout(self)
-        self.setLayout(self.layout)
-        self.index = 0
-        self.items = []
-        self.l_type = QtWidgets.QLabel("Bulding type")
-        self.l_count = QtWidgets.QLabel("Count")
-        self.l_employed = QtWidgets.QLabel("Employed")
-        self.l_income = QtWidgets.QLabel("Income")
-        self.l_cost = QtWidgets.QLabel("Cost")
-        
-        self.layout.addWidget(self.l_type, 0, 0)
-        self.layout.addWidget(self.l_count, 0, 1)
-        self.layout.addWidget(self.l_employed, 0, 2)
-        self.layout.addWidget(self.l_income, 0, 3)
-        self.layout.addWidget(self.l_cost, 0, 4)
-
-    def add_building(self, building, count):
-        item = BuildingEntry(building, count, self)
-        self.items.append(item)
-        idx = len(self.items)
-        item.insert(self.layout, idx)
-        item.decrease.connect(lambda: self.building_count_decrease.emit(item))
-    
-    def remove_building(self, building):
-        item = None
-        for n in self.items:
-            if n.building.is_roughly(building):
-                item = n
-        if item != None:
-            item.remove(self.layout)
-            self.items.remove(item)
-        else:
-            raise RuntimeWarning("BuildingList.remove_building called on non-existent building")
-
-    def update_building(self, building, count):
-        for n in self.items:
-            if n.building.is_roughly(building):
-                n.update_count(count)
-                
-    def clear(self):
-        for item in self.items:
-            item.remove(self.layout)
-        
-        self.items.clear()
     
 class BuildingsTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -475,12 +255,12 @@ class BuildingsTab(QtWidgets.QWidget):
     def recalc_preview(self):
         btype = self.type_selector.currentData()
         count = self.e_count.value()
-        if btype == HOUSE or btype == AIRPORT:
+        if btype == BType.HOUSE or btype == BType.AIRPORT:
             self.e_size.show()
             self.l_size.show()
             size = self.e_size.value()
             building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache), size)
-            if btype == HOUSE and not size in [1, 2, 4, 6]: # perhaps the size is not valid yet, let's just ignore that
+            if btype == BType.HOUSE and not size in [1, 2, 4, 6]: # perhaps the size is not valid yet, let's just ignore that
                 self.l_compcost.setText("Invalid size")
                 self.l_compincome.setText("Invalid size")
                 return
@@ -526,7 +306,7 @@ class BuildingsTab(QtWidgets.QWidget):
             return
 
         btype = self.type_selector.currentData()
-        if btype == AIRPORT or btype == HOUSE:
+        if btype == BType.AIRPORT or btype == BType.HOUSE:
             building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache), self.e_size.value())
         else:
             building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache))
@@ -543,7 +323,7 @@ class BuildingsTab(QtWidgets.QWidget):
         save()
         
         self.parent.transactions_tab.add_transaction(Transaction(
-            TRANSACTION_BUY,
+            TransactionType.BUY,
             data["current_day"].isoformat(),
             buildings=[building] * count,
         ))
@@ -569,7 +349,7 @@ class BuildingsTab(QtWidgets.QWidget):
             self.building_list.update_building(buildings[0], len([1 for b in self.buildings if b.is_roughly(buildings[0])]))
 
         last_t = data["transactions"][-1]
-        if False and last_t.trans_type == TRANSACTION_BUY and last_t.building == building and last_t.count >= count:
+        if False and last_t.trans_type == TransactionType.BUY and last_t.building == building and last_t.count >= count:
             # update/cancel out last transaction instead
             if last_t.count == count:
                 # get rid entirely
@@ -581,7 +361,7 @@ class BuildingsTab(QtWidgets.QWidget):
 
         else:
             self.parent.transactions_tab.add_transaction(Transaction(
-                TRANSACTION_SELL,
+                TransactionType.SELL,
                 data["current_day"].isoformat(),
                 buildings=buildings,
             ))
@@ -638,7 +418,7 @@ class TransactionsTab(QtWidgets.QWidget):
         if event.key() == QtCore.Qt.Key_Delete and self.table.rowCount() > 0:
             row = self.table.currentRow()
             t = data["transactions"][row]
-            if t.trans_type != TRANSACTION_MANUAL:
+            if t.trans_type != TransactionType.MANUAL:
                 pass#return
 
             cont = QtWidgets.QMessageBox.question(self, "Really delete transaction?", "Really delete transaction?")
@@ -658,7 +438,7 @@ class TransactionsTab(QtWidgets.QWidget):
         
         date = data["current_day"].isoformat()
         comment = self.e_comment.text()
-        self.add_transaction(Transaction(TRANSACTION_MANUAL, date, comment=comment, amount=amount))
+        self.add_transaction(Transaction(TransactionType.MANUAL, date, comment=comment, amount=amount))
         self.e_comment.setText("")
         self.e_amount.setText("")
     
@@ -899,7 +679,7 @@ class LoansTab(QtWidgets.QWidget):
         data["loans"].append([self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), 0])
         self.add_loan_widgets(data["loans"][-1])
         self.parent.transactions_tab.add_transaction(Transaction(
-            TRANSACTION_MANUAL,
+            TransactionType.MANUAL,
             data["current_day"].isoformat(),
             comment="Loan from " + self.e_name.text(),
             amount=self.e_amount.value(),
@@ -912,7 +692,7 @@ class LoansTab(QtWidgets.QWidget):
             return
 
         self.parent.transactions_tab.add_transaction(Transaction(
-            TRANSACTION_MANUAL,
+            TransactionType.MANUAL,
             data["current_day"].isoformat(),
             comment="Loan payment to " + loan[2],
             amount=-amount
@@ -1094,7 +874,7 @@ class Main(QtWidgets.QWidget):
                 return
         income, regional_income = calc_income(data)
         self.transactions_tab.add_transaction(Transaction(
-            TRANSACTION_MANUAL,
+            TransactionType.MANUAL,
             data["current_day"].isoformat(),
             comment="Income",
             amount=income,
@@ -1102,7 +882,7 @@ class Main(QtWidgets.QWidget):
         bal = calc_bal(data)
         if bal < 0:
             self.transactions_tab.add_transaction(Transaction(
-                TRANSACTION_MANUAL,
+                TransactionType.MANUAL,
                 data["current_day"].isoformat(),
                 comment="Overdraft interest",
                 amount=bal * OVERDRAFT_INTEREST,
