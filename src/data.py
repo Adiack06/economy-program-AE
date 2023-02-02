@@ -75,5 +75,5 @@ def format_date(date):
     return datetime.date.fromisoformat(date).strftime("%d/%m/%Y")
 
 def format_money(amt):
-    return MONEY_PREFIX + str(round(amt, 2))
+    return f"{MONEY_PREFIX}{amt:.02f}"
 
