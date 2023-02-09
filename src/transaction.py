@@ -22,22 +22,6 @@ class Transaction:
         self.buildings = buildings
         self.timestamp = timestamp
     
-    def serialise(self):
-        if self.trans_type == TransactionType.MANUAL:
-            return {"amount": self.amount, "comment": self.comment, "type": self.trans_type, "timestamp": self.timestamp}
-        else:
-            return {"buildings": self.buildings, "type": self.trans_type, "timestamp": self.timestamp}
-
-    def deserialise(object, date):
-        if object["type"] == TransactionType.MANUAL:
-            return Transaction(object["type"], object["timestamp"], amount=object["amount"], comment=object["comment"])
-        else:
-            if object.get("buildings") == None: # old transaction, assume one building + count (+ lorentz)
-                buildings = [Building.deserialise(object["building"], date, lorentz=object.get("lorentz"))] * object["count"]
-                return Transaction(object["type"], object["timestamp"], buildings=buildings)
-            else: # new transaction, deserialise list of buildings with one lorentz each
-                return Transaction(object["type"], object["timestamp"], buildings=[Building.deserialise(i, date) for i in object["buildings"]])
-            
     def compute_amount(self) -> int:
         if self.trans_type == TransactionType.MANUAL:
             return self.amount

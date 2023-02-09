@@ -157,24 +157,6 @@ eco = Economy(buildings=[
     (Building(BType.FARMING, d, 1), 1919),
 ], balance=-3510.0)
 
-# 8100.817722685765 1454.5103758301166
-def good_one():
-    eco.add_building((Building(BType.HOUSE, d, eco.lorentz(), 2), 1))
-    # print(f"Bal: {eco.bal:.2f}, Emp: {eco.employ():.2f}, Inc: {eco.income():.2f}")
-    eco.day()
-    eco.add_building2(BType.HOUSE, 1, 4)
-    eco.day()
-    eco.add_building2(BType.HOUSE, 1, 1)
-    eco.add_building2(BType.FARMING, 357)
-    eco.day() # 3
-    eco.add_loan([1000, 0.02])
-    eco.add_building2(BType.POLICE_STATION, 1)
-    eco.add_building2(BType.HOUSE, 1, 2)
-    eco.day()
-    eco.add_building2(BType.HOUSE, 1, 2)
-    eco.add_building2(BType.OFFICE, 1)
-    eco.pay_for_loan(0, 1000*1.02)
-    eco.day()
 
 def weird_one():
     eco.add_loan([3000, 0.02])
@@ -194,6 +176,19 @@ def weird_one():
     eco.add_building2(BType.HOUSE, 1, 2)
     eco.add_building2(BType.OFFICE, 1)
     eco.pay_for_loan(0, 1000*1.02)
+    eco.day()
+
+    print("7th:")
+    eco.add_building2(BType.RAILWAY_STATION, 2)
+    eco.add_building2(BType.FARMING, 80)
+    eco.day()
+    eco.add_building2(BType.HOUSE, 1, 6)
+    eco.day()
+    eco.add_building2(BType.RAILWAY_STATION, 1)
+    eco.add_building2(BType.METRO_STATION, 3)
+    eco.day()
+    eco.add_building2(BType.HOUSE, 1, 4)
+    eco.add_building2(BType.FARMING, 82)
     eco.day()
 
 weird_one()

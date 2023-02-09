@@ -59,4 +59,3 @@ BUILDING_INFO = {
     BType.OFFICE                : BuildingInfo(18,    1,     1872.00,  "Office"),
     BType.METRO_STATION         : BuildingInfo(12.9,  1,     1341.60,  "Metro Station")
 }
-

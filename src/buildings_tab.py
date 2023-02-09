@@ -1,11 +1,14 @@
 from PyQt5 import QtWidgets
 from data import *
 from building_list import BuildingList, BuildingEntry
+from constants import BUILDING_INFO
+from building import Building
 
 class BuildingsTab(QtWidgets.QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, data, parent=None):
         super().__init__(parent)
         self.parent = parent
+        self.data = data
         
         self.region_select = QtWidgets.QComboBox(self)
         self.e_newregion = QtWidgets.QLineEdit(self)
@@ -13,7 +16,7 @@ class BuildingsTab(QtWidgets.QWidget):
         self.b_delregion = QtWidgets.QPushButton("Delete region", self)
         
         self.region_select.addItem("Total")
-        for region in data["regions"].keys():
+        for region in data.regions.keys():
             self.region_select.addItem(region)
 
         self.buildings = []
@@ -100,8 +103,8 @@ class BuildingsTab(QtWidgets.QWidget):
         self.e_newregion.setText("")
 
         self.region_select.addItem(region)
-        data["regions"][region] = {"buildings": []}
-        save()
+        self.data.add_region(region)
+        self.data.save()
     
     def del_region(self):
         if not self.check_real_region():
@@ -113,8 +116,8 @@ class BuildingsTab(QtWidgets.QWidget):
         if reply == QtWidgets.QMessageBox.No:
             return
             
-        del data["regions"][region]
-        save()
+        self.data.remove_region(region)
+        self.data.save()
         self.region_select.removeItem(self.region_select.currentIndex())
 
     def region_change(self):
@@ -123,11 +126,11 @@ class BuildingsTab(QtWidgets.QWidget):
         self.building_list.clear()
         self.buildings = []
         if self.curr_region == "Total":
-            for region in data["regions"].values():
-                for building in region["buildings"]:
+            for region in self.data.regions.values():
+                for building in region:
                     self.buildings.append(building)
         else:
-            self.buildings = data["regions"][self.curr_region]["buildings"]
+            self.buildings = self.data.regions[self.curr_region]
         
         building_nums = []
         for building in self.buildings:
@@ -137,7 +140,7 @@ class BuildingsTab(QtWidgets.QWidget):
                 idx = len(building_nums) - 1
             else:
                 idx = [i for i, b in enumerate(building_nums) if b[0].is_roughly(building)][0]
-            building_nums[idx][1] += 1
+            building_nums[idx][1] += building.count
         
         for building, count in building_nums:
             self.building_list.add_building(building, count)
@@ -153,7 +156,7 @@ class BuildingsTab(QtWidgets.QWidget):
             self.e_size.show()
             self.l_size.show()
             size = self.e_size.value()
-            building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache), size)
+            building = Building(btype, self.data.current_day, Building.get_lorentz(self.data.eco_cache), size, count=count)
             if btype == BType.HOUSE and not size in [1, 2, 4, 6]: # perhaps the size is not valid yet, let's just ignore that
                 self.l_compcost.setText("Invalid size")
                 self.l_compincome.setText("Invalid size")
@@ -161,10 +164,10 @@ class BuildingsTab(QtWidgets.QWidget):
         else:
             self.e_size.hide()
             self.l_size.hide()
-            building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache))
+            building = Building(btype, self.data.current_day, Building.get_lorentz(self.data.eco_cache), count=count)
  
-        income = building.income() * count
-        self.l_compcost.setText(format_money(building.cost(l=Building.get_lorentz(eco_cache)) * count))
+        income = building.income()
+        self.l_compcost.setText(format_money(building.cost(l=Building.get_lorentz(self.data.eco_cache))))
         self.l_compincome.setText(format_money(income))
         self.l_compemployees.setText(str(round(building.employees() * count, 3)))
         
@@ -177,15 +180,13 @@ class BuildingsTab(QtWidgets.QWidget):
         self.l_proj_bal.show()
         self.l_proj_income.show()
         self.l_proj_employ.show()
-        for i in range(count):
-            data["regions"][self.curr_region]["buildings"].append(building)
+        self.data.regions[self.curr_region].append(building)
                 
-        self.l_proj_bal.setText("Projected bal: " + format_money(calc_bal(data) - building.cost(l=Building.get_lorentz(eco_cache)) * count))
-        self.l_proj_income.setText("Projected income: " + format_money(calc_income(data)[0]))
-        self.l_proj_employ.setText("Projected employment: " + str(round(calc_employment(data) * 100, 1)) + "%")
+        self.l_proj_bal.setText("Projected bal: " + format_money(calc_bal(self.data) - building.cost(l=Building.get_lorentz(self.data.eco_cache))))
+        self.l_proj_income.setText("Projected income: " + format_money(calc_income(self.data)[0]))
+        self.l_proj_employ.setText("Projected employment: " + str(round(calc_employment(self.data) * 100, 1)) + "%")
         
-        for i in range(count):
-            data["regions"][self.curr_region]["buildings"].pop()
+        self.data.regions[self.curr_region].pop()
     
     def check_real_region(self):
         """check the current region is not 'Total'. If it is, warn the user
@@ -200,26 +201,25 @@ class BuildingsTab(QtWidgets.QWidget):
             return
 
         btype = self.type_selector.currentData()
-        if btype == BType.AIRPORT or btype == BType.HOUSE:
-            building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache), self.e_size.value())
-        else:
-            building = Building(btype, data["current_day"], Building.get_lorentz(eco_cache))
-
         count = self.e_count.value()
+        if btype == BType.AIRPORT or btype == BType.HOUSE:
+            building = Building(btype, self.data.current_day, Building.get_lorentz(self.data.eco_cache), self.e_size.value(), count=count)
+        else:
+            building = Building(btype, self.data.current_day, Building.get_lorentz(self.data.eco_cache), count=count)
+
         if not (building.btype, building.size) in [(b.btype, b.size) for b in self.buildings]:
             self.building_list.add_building(building, 0)
         
-        for i in range(count): # hack, just like clicking it multiple times lol
-            self.buildings.append(building)
+        self.buildings.append(building)
 
-        self.building_list.update_building(building, len([1 for b in self.buildings if b.is_roughly(building)]))
-        data["regions"][self.curr_region]["buildings"] = self.buildings
-        save()
+        self.building_list.update_building(building, sum([b.count for b in self.buildings if b.is_roughly(building)]))
+        self.data.regions[self.curr_region] = self.buildings
+        self.data.save()
         
         self.parent.transactions_tab.add_transaction(Transaction(
             TransactionType.BUY,
-            data["current_day"].isoformat(),
-            buildings=[building] * count,
+            self.data.current_day.isoformat(),
+            buildings=[building],
         ))
         
     def remove_building(self, entry: BuildingEntry):

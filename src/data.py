@@ -4,9 +4,9 @@ import datetime
 def calc_population(data):
     regions = {}
     total_people = 0
-    for region in data["regions"]:
+    for region in data.regions:
         people = 0
-        for building in data["regions"][region]["buildings"]:
+        for building in data.regions[region]:
             if building.btype == BType.HOUSE:
                 people += building.size        
         regions[region] = people
@@ -17,9 +17,9 @@ def calc_population(data):
 def calc_jobs(data):
     regions = {}
     total_jobs = 0
-    for region in data["regions"]:
+    for region in data.regions:
         jobs = 0
-        for building in data["regions"][region]["buildings"]:
+        for building in data.regions[region]:
             if building.btype != BType.HOUSE:
                 jobs += building.employees()
         regions[region] = jobs
@@ -38,9 +38,9 @@ def calc_income(data):
     gross_income = 0
     regional_income = {}
     reduce_by = lambda i, p: i / p if p >= 1 else i * p
-    for region in data["regions"]:
+    for region in data.regions:
         region_gross_income = 0
-        for building in data["regions"][region]["buildings"]:
+        for building in data.regions[region]:
             region_gross_income += building.income()
 
         region_income = reduce_by(region_gross_income, employment)
@@ -52,7 +52,7 @@ def calc_income(data):
 
 def calc_bal(data):
     bal = 0
-    for t in data["transactions"]:
+    for t in data.transactions:
         bal += t.compute_amount()
     
     return bal
@@ -61,8 +61,8 @@ def calc_industry_income(data):
     industries = {}
     employ = calc_employment(data)
     reduce_by = lambda i, p: i / p if p >= 1 else i * p
-    for region in data["regions"]:
-        for building in data["regions"][region]["buildings"]:
+    for region in data.regions:
+        for building in data.regions[region]:
             if building.btype != HOUSE:
                 if not building.name() in industries:
                     industries[building.name()] = 0

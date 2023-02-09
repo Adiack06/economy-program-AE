@@ -39,60 +39,126 @@ else:
     BACKUP_DIR = "backups"
     ECONOMY_FILE = "economy.json"
 
-data = {
-    "regions": {},
-    "transactions": [Transaction(TransactionType.MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance")],
-    "current_day": datetime.date(2022, 10, 10),
-    "loans": [],
-}
+class Data:
+    def __init__(self):
+        self.regions = {}
+        self.transactions = []
+        self.current_day = None
+        self.loans = []
+        self.eco_cache = 0
 
+    def set_defaults(self):
+        self.transactions.append(Transaction(TransactionType.MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance"))
+        self.current_day = datetime.date(2022, 10, 10)
 
-# hack to make json serialise my types properly lmao
-def wrapped_default(self, obj):
-    return getattr(obj.__class__, "serialise", wrapped_default.default)(obj)
-wrapped_default.default = json.JSONEncoder().default
-json.JSONEncoder.default = wrapped_default
+    def read_from_file(self, fname):
+        with open(fname, "r") as f:
+            raw_data = json.loads(f.read())
 
-def deserialise_all(raw_data):
-    data = {"regions": {}, "current_day": datetime.date.fromisoformat(raw_data["current_day"])}
-    for reg in raw_data["regions"]:
-        data["regions"][reg] = {"buildings": []}
-        for b in raw_data["regions"][reg]["buildings"]:
-            data["regions"][reg]["buildings"].append(Building.deserialise(b, data["current_day"]))
-            
-    data["transactions"] = [Transaction.deserialise(t, data["current_day"]) for t in raw_data["transactions"]]
-    data["loans"] = raw_data.get("loans", [])
-    return data
-
-if os.path.exists(ECONOMY_FILE):
-    with open(ECONOMY_FILE, "r") as f:
-        raw_data = json.load(f)
+        self.current_day = datetime.date.fromisoformat(raw_data["current_day"])
         
-    data = deserialise_all(raw_data)
+        for reg in raw_data["regions"]:
+            self.regions[reg] = []
+            for b in raw_data["regions"][reg]["buildings"]:
+                self.regions[reg].append(self.deserialise_building(b))
+        
+        self.transactions = [self.deserialise_transaction(t) for t in raw_data["transactions"]]
+        self.loans = raw_data.get("loans", [])
+        self.eco_cache = calc_income(self)[0]
+
+    def write_to_file(self, fname):
+        raw_data = {"current_day": self.current_day.isoformat(),
+                    "regions": {r: {"buildings": [self.serialise_building(b) for b in self.regions[r]]} for r in self.regions},
+                    "loans": self.loans,
+                    "transactions": [self.serialise_transaction(t) for t in self.transactions]}
+        
+        with open(fname, "w") as f:
+            f.write(json.dumps(raw_data))
+
+    def serialise_building(self, b):
+        # either [type, size, lorentz] if only one
+        # or [type, size, lorentz, count] if run length encoded
+        if b.count == 1:
+            return [b.btype, b.size, b.lorentz]
+        else:
+            return [b.btype, b.size, b.lorentz, b.count]
+            
+    def deserialise_building(self, obj, lorentz: float=None):
+        if lorentz is None:
+            lorentz = 1
+        # old serialised buildings are either a list of [type, size]
+        # or just a single int type. New serialised buildings are always
+        # a list of [type, size, lorentz] to avoid ambiguity.
+        # this is actually a lie now, *new* new buildings are either a 
+        # [type, size, lorentz] or a [type, size, lorentz, count]
+        # for run length encoding
+        if type(obj) == list:
+            if len(obj) == 2: # old building, type and size
+                return Building(obj[0], self.current_day, lorentz, obj[1])
+            elif len(obj) == 3: # new building, type size and lorentz
+                return Building(obj[0], self.current_day, obj[2], obj[1])
+            elif len(obj) == 4: # new new buildig, (type, size, lorentz, count)
+                return Building(obj[0], self.current_day, obj[2]. obj[1], count=obj[3])
+        else: # old building, just type
+            return Building(obj, self.current_day, lorentz)
+
+    def serialise_transaction(self, trans):
+        if trans.trans_type == TransactionType.MANUAL:
+            return {"amount": trans.amount,
+                    "comment": trans.comment,
+                    "type": trans.trans_type,
+                    "timestamp": trans.timestamp}
+        else:
+            return {"buildings": [self.serialise_building(b) for b in trans.buildings],
+                    "type": trans.trans_type,
+                    "timestamp": trans.timestamp}
+
+    def deserialise_transaction(self, object):
+        if object["type"] == TransactionType.MANUAL:
+            return Transaction(object["type"], object["timestamp"], amount=object["amount"], comment=object["comment"])
+        else:
+            if object.get("buildings") == None: # old transaction, assume one building + count (+ lorentz)
+                buildings = [self.deserialise_building(object["building"], lorentz=object.get("lorentz"))] * object["count"]
+                return Transaction(object["type"], object["timestamp"], buildings=buildings)
+            else: # new transaction, deserialise list of buildings with one lorentz each
+                return Transaction(object["type"], object["timestamp"], buildings=[self.deserialise_building(i) for i in object["buildings"]])
+ 
+    def save(self):
+        self.write_to_file(ECONOMY_FILE)
+
+    def add_region(self, reg_name):
+        self.regions[reg_name] = []
+
+    def remove_region(self, reg_name):
+        del self.regions[reg_name]
+
+
+def update_backup_formats():
+    """Load and save every backup and the economy file,
+       which should save every file in the latest format"""
+
+    if not os.path.isdir(BACKUP_DIR):
+        return
     
+    for fname in os.listdir(BACKUP_DIR):
+        newdata = Data()
+        newdata.read_from_file(os.path.join(BACKUP_DIR, fname))
+        newdata.write_to_file(os.path.join(BACKUP_DIR, fname))
 
+    newdata = Data()
+    newdata.read_from_file(ECONOMY_FILE)
+    newdata.write_to_file(ECONOMY_FILE)
 
-def serialise_all():
-    ddata = data.copy()
-    ddata["current_day"] = data["current_day"].isoformat()
-    file_data = json.dumps(ddata, indent=None)
-    return file_data
-
-def save():
-    file_data = serialise_all()
-    with open(ECONOMY_FILE, "w") as f:
-        f.write(file_data)
-
-def get_historical_datas():
+def get_historical_datas(data):
+    """Return a list of backups, plus the current data"""
     if not os.path.isdir(BACKUP_DIR):
         return []
     
     datas = []
     for fname in os.listdir(BACKUP_DIR):
-        with open(os.path.join(BACKUP_DIR, fname), "r") as f:
-            raw_data = json.load(f)
-        
-        datas.append(deserialise_all(raw_data))
+        newdata = Data()
+        newdata.read_from_file(os.path.join(BACKUP_DIR, fname))
+        datas.append(newdata)
     
     datas.append(data)
     return datas
@@ -104,9 +170,6 @@ def send_info_popup(txt):
     msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
     msg.exec_()
 
-
-eco_cache = calc_income(data)[0]
-
 class KeybindTable(QtWidgets.QTableWidget):
     keyPressed = Qt.pyqtSignal(QtGui.QKeyEvent)
     def keyPressEvent(self, event):    
@@ -115,9 +178,10 @@ class KeybindTable(QtWidgets.QTableWidget):
 
 class TransactionsTab(QtWidgets.QWidget):
     recalculate = Qt.pyqtSignal()
-    def __init__(self, parent=None):
+    def __init__(self, data, parent=None):
         super().__init__(parent)
         self.parent = parent
+        self.data = data
         self.layout = QtWidgets.QGridLayout(self)
         self.bottom_layout = QtWidgets.QHBoxLayout()
         
@@ -147,23 +211,23 @@ class TransactionsTab(QtWidgets.QWidget):
         
         self.transaction_widgets = []
         
-        for t in data["transactions"]:
+        for t in data.transactions:
             self._add_transaction_to_table(t)
         self.recalculate.emit()
         
     def _table_keypress(self, event):
         if event.key() == QtCore.Qt.Key_Delete and self.table.rowCount() > 0:
             row = self.table.currentRow()
-            t = data["transactions"][row]
+            t = self.data.transactions[row]
             if t.trans_type != TransactionType.MANUAL:
                 pass#return
 
             cont = QtWidgets.QMessageBox.question(self, "Really delete transaction?", "Really delete transaction?")
             if cont == QtWidgets.QMessageBox.No:
                 return
-            data["transactions"].pop(row)
+            self.data.transactions.pop(row)
             self.table.removeRow(row)
-            save()
+            self.data.save()
             self.recalculate.emit()
 
     def _add_transaction_button(self):
@@ -173,15 +237,15 @@ class TransactionsTab(QtWidgets.QWidget):
             send_info_popup("Enter a valid number for the amount (without any $)")
             return
         
-        date = data["current_day"].isoformat()
+        date = self.data.current_day.isoformat()
         comment = self.e_comment.text()
         self.add_transaction(Transaction(TransactionType.MANUAL, date, comment=comment, amount=amount))
         self.e_comment.setText("")
         self.e_amount.setText("")
     
     def add_transaction(self, transaction: Transaction):
-        data["transactions"].append(transaction)
-        save()
+        self.data.transactions.append(transaction)
+        self.data.save()
 
         self._add_transaction_to_table(transaction)
         self.recalculate.emit()
@@ -207,8 +271,8 @@ def calc_series(datas, series):
         vals = []
         for d in datas:
             vals.append(0)
-            for trans in d["transactions"]:
-                if trans.timestamp == d["current_day"].isoformat() and trans.compute_amount() < 0:
+            for trans in d.transactions:
+                if trans.timestamp == d.current_day.isoformat() and trans.compute_amount() < 0:
                     vals[-1] -= trans.compute_amount()
         return vals
     elif series == "Employment":
@@ -218,9 +282,10 @@ def calc_series(datas, series):
         return [i for i, d in enumerate(datas)]
     
 class GraphControls(QtWidgets.QWidget):
-    def __init__(self, figure, parent=None):
+    def __init__(self, figure, data, parent=None):
         super().__init__(parent)
         self.figure = figure
+        self.data = data
         self.ax = figure.subplots()
 
         self.layout = QtWidgets.QVBoxLayout(self)
@@ -319,7 +384,7 @@ class GraphControls(QtWidgets.QWidget):
             self.ax.axis('equal')
         
         elif gtype == "Line graph" or gtype == "Scatter graph":
-            datas = sorted(get_historical_datas(), key=lambda d: d["current_day"])
+            datas = sorted(get_historical_datas(self.data), key=lambda d: d.current_day)
             xvals = calc_series(datas, xaxis)
             yvals = calc_series(datas, yaxis)
             if gtype == "Line graph":
@@ -338,7 +403,7 @@ class MoronException(Exception):
     pass
 
 class StatsTab(QtWidgets.QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, data, parent=None):
         super().__init__(parent)
         self.parent = parent
         self.layout = QtWidgets.QGridLayout(self)
@@ -351,7 +416,7 @@ class StatsTab(QtWidgets.QWidget):
         self.graph_layout.addWidget(self.toolbar)
         self.graph_layout.addWidget(self.canvas)
 
-        self.graph_controls = GraphControls(self.figure, self)
+        self.graph_controls = GraphControls(self.figure, data, self)
 
         self.layout.addWidget(self.graph_controls, 0, 0, 1, 1)
         self.layout.addLayout(self.graph_layout, 0, 1, 3, 1)
@@ -359,9 +424,10 @@ class StatsTab(QtWidgets.QWidget):
         self.setLayout(self.layout)
 
 class LoansTab(QtWidgets.QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, data, parent=None):
         super().__init__(parent)
         self.parent = parent
+        self.data = data
 
         self.layout = QtWidgets.QGridLayout(self)
         
@@ -413,15 +479,15 @@ class LoansTab(QtWidgets.QWidget):
             self.e_name.setEnabled(True)
 
     def get_loan(self):
-        data["loans"].append([self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), 0])
-        self.add_loan_widgets(data["loans"][-1])
+        self.data.loans.append([self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), 0])
+        self.add_loan_widgets(data.loans[-1])
         self.parent.transactions_tab.add_transaction(Transaction(
             TransactionType.MANUAL,
-            data["current_day"].isoformat(),
+            self.data.current_day.isoformat(),
             comment="Loan from " + self.e_name.text(),
             amount=self.e_amount.value(),
         ))
-        save()
+        self.data.save()
 
     def make_payment(self, pos, loan):
         amount, ok = QtWidgets.QInputDialog.getDouble(self, "Make loan payment", "How much would you like to pay?", 0, 1, loan[0], 2)
@@ -430,30 +496,30 @@ class LoansTab(QtWidgets.QWidget):
 
         self.parent.transactions_tab.add_transaction(Transaction(
             TransactionType.MANUAL,
-            data["current_day"].isoformat(),
+            self.data.current_day.isoformat(),
             comment="Loan payment to " + loan[2],
             amount=-amount
         ))
 
         # this is stupid
         idx = -1
-        for i, l in enumerate(data["loans"]):
+        for i, l in enumerate(data.loans):
             if l[1] == loan[1] and l[2] == loan[2]:
                 idx = i
                 break
         if idx == -1:
             raise MoronException("For some reason the loan you tried to pay off wasn't found in your total loan list. big but report to jams plz")
-        data["loans"][idx][3] += amount
-        data["loans"][idx][0] -= amount
-        if data["loans"][idx][0] < 0.01:
-            if data["loans"][idx][2] != "UN":
-                to_pay_other = data["loans"][idx][3]
-                send_info_popup("You paid a total of " + format_money(to_pay_other) + " to " + data["loans"][idx][2])
-            data["loans"].pop(idx)
+        self.data.loans[idx][3] += amount
+        self.data.loans[idx][0] -= amount
+        if self.data.loans[idx][0] < 0.01:
+            if self.data.loans[idx][2] != "UN":
+                to_pay_other = self.data.loans[idx][3]
+                send_info_popup("You paid a total of " + format_money(to_pay_other) + " to " + self.data.loans[idx][2])
+            self.data.loans.pop(idx)
             self.update_loan_widgets()
         else:
-            self.loans[pos][0].setText(format_money(data["loans"][idx][0]))
-        save()
+            self.loans[pos][0].setText(format_money(self.data.loans[idx][0]))
+        self.data.save()
 
     def add_loan_widgets(self, loan):
         self.loans.append((
@@ -478,21 +544,20 @@ class LoansTab(QtWidgets.QWidget):
 
         self.curr_row = 1
 
-        for loan in data["loans"]:
+        for loan in self.data.loans:
             self.add_loan_widgets(loan)
 
 class Main(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, data):
         super().__init__()
-        self.init_gui()
+        self.data = data
+        self.init_gui(data)
 
         self.show()
         
-    def init_gui(self):
+    def init_gui(self, data):
         self.layout = QtWidgets.QVBoxLayout(self)
 
-       
-        
         self.local_stats_layout = QtWidgets.QHBoxLayout()
         self.global_stats_layout = QtWidgets.QHBoxLayout()
         self.date_layout = QtWidgets.QHBoxLayout()
@@ -531,10 +596,10 @@ class Main(QtWidgets.QWidget):
         self.date_layout.addWidget(self.b_next_day)
         self.date_layout.addWidget(self.b_update_day)
         
-        self.stats_tab = StatsTab(self)
-        self.transactions_tab = TransactionsTab(self)
-        self.buildings_tab = BuildingsTab(self)
-        self.loans_tab = LoansTab(self)
+        self.stats_tab = StatsTab(data, self)
+        self.transactions_tab = TransactionsTab(data, self)
+        self.buildings_tab = BuildingsTab(data, self)
+        self.loans_tab = LoansTab(data, self)
         
         self.tab_widget = QtWidgets.QTabWidget(self)
         self.tab_widget.addTab(self.buildings_tab, "Buildings")
@@ -553,11 +618,11 @@ class Main(QtWidgets.QWidget):
     def recalculate(self):
         self.recalc_balance()
         self.recalc_income()
-        self.l_date.setText("Current date: " + format_date(data["current_day"].isoformat()))
-        self.l_pop.setText("Population: " + str(calc_population(data)[0]))
-        self.l_jobs.setText("Jobs: " + str(round(calc_jobs(data)[0], 2)))
+        self.l_date.setText("Current date: " + format_date(self.data.current_day.isoformat()))
+        self.l_pop.setText("Population: " + str(calc_population(self.data)[0]))
+        self.l_jobs.setText("Jobs: " + str(round(calc_jobs(self.data)[0], 2)))
         self.buildings_tab.recalc_preview()
-        self.l_lorentz.setText("L: " + str(round(Building.get_lorentz(eco_cache), 4)))
+        self.l_lorentz.setText("L: " + str(round(Building.get_lorentz(self.data.eco_cache), 4)))
         self.recalc_regional_stats(self.buildings_tab)
         
     def recalc_regional_stats(self, buildings_tab):
@@ -568,8 +633,8 @@ class Main(QtWidgets.QWidget):
             self.l_regpop.hide()
             self.l_regjobs.hide()
         else:
-            _, reg_pop = calc_population(data)
-            _, reg_jobs = calc_jobs(data)
+            _, reg_pop = calc_population(self.data)
+            _, reg_jobs = calc_jobs(self.data)
             pop = reg_pop[buildings_tab.curr_region]
             jobs = reg_jobs[buildings_tab.curr_region]
             
@@ -578,7 +643,7 @@ class Main(QtWidgets.QWidget):
             else:
                 employ_percent = 0
 
-            _, regional_income = calc_income(data)
+            _, regional_income = calc_income(self.data)
             inc = regional_income[buildings_tab.curr_region]
             
             self.l_regincome.show()
@@ -591,14 +656,14 @@ class Main(QtWidgets.QWidget):
             self.l_regjobs.setText("Jobs (region): " + str(round(jobs, 2)))
             
     def recalc_balance(self):
-        bal = calc_bal(data)
+        bal = calc_bal(self.data)
         self.l_bal.setText("Balance: " + format_money(bal))
         
     def recalc_income(self):
         global eco_cache
-        employment = calc_employment(data)
-        income, regional_income = calc_income(data)
-        eco_cache = income
+        employment = calc_employment(self.data)
+        income, regional_income = calc_income(self.data)
+        self.data.eco_cache = income
         
         self.l_income.setText("Income: " + format_money(income))
         self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
@@ -606,13 +671,13 @@ class Main(QtWidgets.QWidget):
     def get_paid(self):
         # this check is currently redundant but I left it in for the lulz
         for n in data["transactions"][::-1]:
-            if n.comment == "Income" and n.timestamp == data["current_day"].isoformat():
+            if n.comment == "Income" and n.timestamp == self.data.current_day.isoformat():
                 send_info_popup("YE CANNAE FOCKEN DAE THAT M8\n(you can only get paid once per day)")
                 return
         income, regional_income = calc_income(data)
         self.transactions_tab.add_transaction(Transaction(
             TransactionType.MANUAL,
-            data["current_day"].isoformat(),
+            self.data.current_day.isoformat(),
             comment="Income",
             amount=income,
         ))
@@ -620,25 +685,25 @@ class Main(QtWidgets.QWidget):
         if bal < 0:
             self.transactions_tab.add_transaction(Transaction(
                 TransactionType.MANUAL,
-                data["current_day"].isoformat(),
+                self.data.current_day.isoformat(),
                 comment="Overdraft interest",
                 amount=bal * OVERDRAFT_INTEREST,
             ))
 
     def calc_loans(self):
-        for loan in data["loans"]:
+        for loan in self.data.loans:
             loan[0] *= loan[1] / 100 + 1
         self.loans_tab.update_loan_widgets()
 
     def update_day(self, delta=None):
         if delta is not None:
             now = datetime.date.today()
-            next_day = data["current_day"] + datetime.timedelta(days=delta)
+            next_day = self.data.current_day + datetime.timedelta(days=delta)
             if next_day > now:
                 send_info_popup("Woah there buddy you aren't goint 88mph\n(you're trying to go into the future!)")
                 return
 
-        save()
+        self.data.save()
         if os.path.exists(BACKUP_DIR) and os.path.isfile(BACKUP_DIR):
             raise MoronException("You absolute idiot, you made a file called 'backups', that's where I want to store my backups! Please delete or rename it")
         if not os.path.exists(BACKUP_DIR):
@@ -648,25 +713,22 @@ class Main(QtWidgets.QWidget):
         # The truth is, I do not care, for it is exceedingly unlikely that anything could happen in between
         # also it wouldn't even matter that much it would just crash and save the progress anyway lmao
         
-        text_data = serialise_all()
-        with open(os.path.join(BACKUP_DIR, data["current_day"].isoformat() + ".json"), "w") as f:
-            f.write(text_data)
+        self.data.write_to_file(os.path.join(BACKUP_DIR, self.data.current_day.isoformat() + ".json"))
             
         if delta is None:
-            data["current_day"] = datetime.date.today()
+            self.data.current_day = datetime.date.today()
         else:
-            data["current_day"] += datetime.timedelta(days=delta)
+            self.data.current_day += datetime.timedelta(days=delta)
         self.get_paid()
         self.calc_loans()
         self.recalculate()
-        save()
+        self.data.save()
 
 def exception_hook(exctype, value, tb):
     traceback_formated = traceback.format_exception(exctype, value, tb)
     traceback_string = "".join(traceback_formated)
     print("Excepthook called, saving and quiteing...")
-    # TODO maybe save data in ram data["regions"][btab.curr_region]["buildings"] = btab.buildings
-    save()
+    data.save()
     print(traceback_string, file=sys.stderr)
     
     msg = QtWidgets.QMessageBox()
@@ -776,8 +838,14 @@ if __name__ == '__main__':
     updater.update()
     if updater.exec():
         sys.exit(0)
+    
+    data = Data()
+    if os.path.exists(ECONOMY_FILE):
+        data.read_from_file(ECONOMY_FILE)
+    else:
+        data.set_defaults()
 
-    ex = Main()
+    ex = Main(data)
     if os.path.isfile("stylesheets.qss"):
         with open("stylesheets.qss", "r") as f:
             ex.setStyleSheet(f.read())
