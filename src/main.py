@@ -25,7 +25,7 @@ from data import *
 from transaction import Transaction, TransactionType
 from buildings_tab import BuildingsTab
 
-MY_VERSION = "1.3.2"
+MY_VERSION = "1.3.3"
 
 # really bad idea tbh
 # try to guess the location of economy.json
@@ -670,7 +670,7 @@ class Main(QtWidgets.QWidget):
         
     def get_paid(self):
         # this check is currently redundant but I left it in for the lulz
-        for n in data["transactions"][::-1]:
+        for n in data.transactions[::-1]:
             if n.comment == "Income" and n.timestamp == self.data.current_day.isoformat():
                 send_info_popup("YE CANNAE FOCKEN DAE THAT M8\n(you can only get paid once per day)")
                 return

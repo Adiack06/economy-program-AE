@@ -3,6 +3,14 @@ from data import *
 from building_list import BuildingList, BuildingEntry
 from constants import BUILDING_INFO
 from building import Building
+from transaction import Transaction, TransactionType
+
+def send_info_popup(txt):
+    msg = QtWidgets.QMessageBox()
+    msg.setIcon(QtWidgets.QMessageBox.Information)
+    msg.setText(txt)
+    msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+    msg.exec_()
 
 class BuildingsTab(QtWidgets.QWidget):
     def __init__(self, data, parent=None):
