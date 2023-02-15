@@ -34,9 +34,7 @@ def handle_client(conn):
         print(f"{addr} identified as {whoami}")
 
         queue = player_queues.get(whoami, [])
-        conn.send(json.dumps({"queue_len": len(queue)}).encode("utf-8") + b"\n")
-        for packet in queue:
-            conn.send(json.dumps(packet).encode("utf-8") + b"\n")
+        conn.send(json.dumps(queue).encode("utf-8") + b"\n")
 
         req = recv_data(conn)
         player = req["player"]

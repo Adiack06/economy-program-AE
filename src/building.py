@@ -42,8 +42,10 @@ class Building:
             return self.size / 20 * self.count
         return BUILDING_INFO[self.btype].employees * self.count
     
-    def name(self) -> str:
+    def name(self, airports_together=False) -> str:
         if self.btype == BType.AIRPORT:
+            if airports_together:
+                return "Airport"
             return str(self.size) + " block long airport"
         if self.btype == BType.HOUSE:
             return {1: "One", 2: "Two", 4: "Four", 6: "Six"}[self.size] + " person house"

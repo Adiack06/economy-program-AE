@@ -61,15 +61,14 @@ def calc_industry_income(data):
     industries = {}
     employ = calc_employment(data)
     reduce_by = lambda i, p: i / p if p >= 1 else i * p
-    for region in data.regions:
-        for building in data.regions[region]:
+    for region in data["regions"]:
+        for building in data["regions"][region]["buildings"]:
             if building.btype != HOUSE:
-                if not building.name() in industries:
-                    industries[building.name()] = 0
-                industries[building.name()] += reduce_by(building.income(), employ)
+                if not building.name(airports_together=True) in industries:
+                    industries[building.name(airports_together=True)] = 0
+                industries[building.name(airports_together=True)] += reduce_by(building.income(), employ)
 
     return industries
-
 
 def format_date(date):
     return datetime.date.fromisoformat(date).strftime("%d/%m/%Y")

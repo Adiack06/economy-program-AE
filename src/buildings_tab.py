@@ -1,4 +1,4 @@
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, Qt
 from data import *
 from building_list import BuildingList, BuildingEntry
 from constants import BUILDING_INFO
@@ -13,6 +13,7 @@ def send_info_popup(txt):
     msg.exec_()
 
 class BuildingsTab(QtWidgets.QWidget):
+    region_changed = Qt.pyqtSignal(str)
     def __init__(self, data, parent=None):
         super().__init__(parent)
         self.parent = parent
@@ -154,8 +155,7 @@ class BuildingsTab(QtWidgets.QWidget):
             self.building_list.add_building(building, count)
         
         self.recalc_preview()
-
-        self.parent.recalc_regional_stats(self)
+        self.region_changed.emit(self.curr_region)
         
     def recalc_preview(self):
         btype = self.type_selector.currentData()

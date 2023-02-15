@@ -25,7 +25,7 @@ from data import *
 from transaction import Transaction, TransactionType
 from buildings_tab import BuildingsTab
 
-MY_VERSION = "1.3.3"
+MY_VERSION = "1.3.5"
 
 # really bad idea tbh
 # try to guess the location of economy.json
@@ -45,7 +45,9 @@ class Data:
         self.transactions = []
         self.current_day = None
         self.loans = []
+        self.given_loans = []
         self.eco_cache = 0
+        self.future_packets = []
 
     def set_defaults(self):
         self.transactions.append(Transaction(TransactionType.MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance"))
@@ -64,12 +66,16 @@ class Data:
         
         self.transactions = [self.deserialise_transaction(t) for t in raw_data["transactions"]]
         self.loans = raw_data.get("loans", [])
+        self.loans = raw_data.get("given_loans", [])
+        self.future_packets = raw_data.get("future_packets", [])
         self.eco_cache = calc_income(self)[0]
 
     def write_to_file(self, fname):
         raw_data = {"current_day": self.current_day.isoformat(),
                     "regions": {r: {"buildings": [self.serialise_building(b) for b in self.regions[r]]} for r in self.regions},
                     "loans": self.loans,
+                    "given_loans": self.given_loans,
+                    "future_packets": self.future_packets,
                     "transactions": [self.serialise_transaction(t) for t in self.transactions]}
         
         with open(fname, "w") as f:
@@ -423,10 +429,26 @@ class StatsTab(QtWidgets.QWidget):
         self.layout.setColumnStretch(1, 1)
         self.setLayout(self.layout)
 
+class LoanList(QtWidgets.QFrame):
+    def __init__(self, label, parent=None):
+        super().__init__(parent)
+        self.layout = QtWidgets.QGridLayout(self)
+
+        self.layout.addWidget(QtWidgets.QLabel(label, self), 0, 0, 1, 3, alignment=QtCore.Qt.AlignCenter)
+        self.layout.addWidget(QtWidgets.QLabel("Amount due for payback", self), 1, 0)
+        self.layout.addWidget(QtWidgets.QLabel("Interest rate", self), 1, 1)
+        self.layout.addWidget(QtWidgets.QLabel("Name", self), 1, 2)
+        self.layout.setRowStretch(1000, 1)
+        
+        self.setFrameStyle(QtWidgets.QFrame.Raised | QtWidgets.QFrame.StyledPanel)
+        self.curr_row = 1
+        self.setLayout(self.layout)
+
 class LoansTab(QtWidgets.QWidget):
+    loan_given = Qt.pyqtSignal()
+    
     def __init__(self, data, parent=None):
         super().__init__(parent)
-        self.parent = parent
         self.data = data
 
         self.layout = QtWidgets.QGridLayout(self)
@@ -434,59 +456,58 @@ class LoansTab(QtWidgets.QWidget):
         self.e_amount = QtWidgets.QSpinBox(self)
         self.e_amount.setMaximum(999999999)
         self.l_amount = QtWidgets.QLabel("Amount", self)
-        self.b_un = QtWidgets.QCheckBox("UN loan", self)
+        # self.b_un = QtWidgets.QCheckBox("UN loan", self)
         self.e_interest_rate = QtWidgets.QDoubleSpinBox(self)
         self.l_interest_rate = QtWidgets.QLabel("Interest Rate (%)", self)
         self.e_name = QtWidgets.QLineEdit(self)
         self.l_name = QtWidgets.QLabel("Name", self)
-        self.b_get_loan = QtWidgets.QPushButton("Add loan", self)
+        self.b_give_loan = QtWidgets.QPushButton("Add loan", self)
 
-        self.ongoing_loans = QtWidgets.QGridLayout()
-        self.spacer = QtWidgets.QLabel("")
+        self.given_loans_widget = LoanList("Loans given out", self)
+        self.taken_loans_widget = LoanList("Loans taken out", self)
 
         self.layout.addWidget(self.l_amount, 0, 0)
         self.layout.addWidget(self.e_amount, 1, 0)
-        self.layout.addWidget(self.b_un,     1, 1)
+        # self.layout.addWidget(self.b_un,     1, 1)
         self.layout.addWidget(self.l_interest_rate, 0, 2)
         self.layout.addWidget(self.e_interest_rate, 1, 2)
         self.layout.addWidget(self.l_name, 0, 3)
         self.layout.addWidget(self.e_name, 1, 3)
-        self.layout.addWidget(self.b_get_loan, 1, 4)
-        self.layout.addLayout(self.ongoing_loans, 4, 0, 1, 5)
-        self.layout.addWidget(self.spacer, 5, 0, 1, 5)
-        self.layout.setRowStretch(5, 1)
+        self.layout.addWidget(self.b_give_loan, 1, 4)
+        self.layout.addWidget(self.given_loans_widget, 2, 0, 1, 5)
+        self.layout.addWidget(self.taken_loans_widget, 3, 0, 1, 5)
+        self.layout.setRowStretch(2, 1)
+        self.layout.setRowStretch(3, 1)
 
         self.setLayout(self.layout)
 
-        self.b_un.clicked.connect(self.un_loan)
-        self.b_get_loan.clicked.connect(self.get_loan)
-        self.loans = []
-        self.ongoing_loans.addWidget(QtWidgets.QLabel("Amount due for payback"), 0, 0)
-        self.ongoing_loans.addWidget(QtWidgets.QLabel("Interest rate"), 0, 1)
-        self.ongoing_loans.addWidget(QtWidgets.QLabel("Lender name"), 0, 2)
-        self.curr_row = 1
+        # self.b_un.clicked.connect(self.un_loan)
+        self.b_give_loan.clicked.connect(self.give_loan)
+        self.given_loans = []
+        self.taken_loans = []
 
-        self.update_loan_widgets()
+        # self.update_loan_widgets()
 
-    def un_loan(self):
-        if self.b_un.isChecked():
-            self.e_interest_rate.setEnabled(False)
-            self.e_interest_rate.setValue(UN_LOAN_INTEREST * 100)
-            self.e_name.setEnabled(False)
-            self.e_name.setText("UN")
-        else:
-            self.e_interest_rate.setEnabled(True)
-            self.e_name.setEnabled(True)
+    # def un_loan(self):
+    #     if self.b_un.isChecked():
+    #         self.e_interest_rate.setEnabled(False)
+    #         self.e_interest_rate.setValue(UN_LOAN_INTEREST * 100)
+    #         self.e_name.setEnabled(False)
+    #         self.e_name.setText("UN")
+    #     else:
+    #         self.e_interest_rate.setEnabled(True)
+    #         self.e_name.setEnabled(True)
 
-    def get_loan(self):
-        self.data.loans.append([self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), 0])
+    def give_loan(self):
+        self.data.loans_given.append([self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), 0])
         self.add_loan_widgets(data.loans[-1])
         self.parent.transactions_tab.add_transaction(Transaction(
-            TransactionType.MANUAL,
+            TransactionType.GIVEN_LOAN,
             self.data.current_day.isoformat(),
-            comment="Loan from " + self.e_name.text(),
+            comment="Loan to " + self.e_name.text(),
             amount=self.e_amount.value(),
         ))
+        self.parent.send_loan_packet(self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), self.data.current_day.isoformat())
         self.data.save()
 
     def make_payment(self, pos, loan):
@@ -508,7 +529,7 @@ class LoansTab(QtWidgets.QWidget):
                 idx = i
                 break
         if idx == -1:
-            raise MoronException("For some reason the loan you tried to pay off wasn't found in your total loan list. big but report to jams plz")
+            raise MoronException("For some reason the loan you tried to pay off wasn't found in your total loan list. big bug report to jams plz")
         self.data.loans[idx][3] += amount
         self.data.loans[idx][0] -= amount
         if self.data.loans[idx][0] < 0.01:
@@ -547,25 +568,58 @@ class LoansTab(QtWidgets.QWidget):
         for loan in self.data.loans:
             self.add_loan_widgets(loan)
 
-class Main(QtWidgets.QWidget):
-    def __init__(self, data):
-        super().__init__()
-        self.data = data
-        self.init_gui(data)
+class NetworkHandler:
+    def __init__(self):
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        self.show()
-        
-    def init_gui(self, data):
+    def read(self):
+        data = b""
+        while not b"\n" in data:
+            d = self.s.recv(1024)
+            if not d:
+                break
+            data += d
+        data = json.loads(data.decode("utf-8"))
+        return data
+
+    def send(self, data):
+        self.s.send(json.dumps(data).encode("utf-8") + b"\n")
+
+    def connect(self, data, parent):
+        try:
+            self.s.connect(("127.0.0.1", 7894))
+        except Exception as e:
+            send_info_popup("Error connecting to server: " + str(e))
+            return False
+
+        self.send({"whoami": data.whoami})
+        packet_queue = self.read()
+        for packet in packet_queue:
+            if datetime.date.fromisoformat(packet["date"]) <= data.current_day:
+                NetworkHandler.execute_packet(packet, data, parent)
+            else:
+                data.future_packets.append(packet)
+        return True
+
+    def execute_packet(packet, data, parent):
+        if packet["type"] == "give_loan":
+            pass
+
+class InfoBar(QtWidgets.QWidget):
+    update_day = Qt.pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
         self.layout = QtWidgets.QVBoxLayout(self)
-
         self.local_stats_layout = QtWidgets.QHBoxLayout()
         self.global_stats_layout = QtWidgets.QHBoxLayout()
         self.date_layout = QtWidgets.QHBoxLayout()
         
         self.b_update_day = QtWidgets.QPushButton("Update day to today's date", self)
         self.b_next_day = QtWidgets.QPushButton("Next day", self)
-        self.b_update_day.clicked.connect(lambda: self.update_day())
-        self.b_next_day.clicked.connect(lambda: self.update_day(delta=1))
+        self.b_update_day.clicked.connect(lambda: self.update_day.emit(None))
+        self.b_next_day.clicked.connect(lambda: self.update_day.emit(1))
 
         self.l_bal = QtWidgets.QLabel(self)
         self.l_income = QtWidgets.QLabel(self)
@@ -580,22 +634,98 @@ class Main(QtWidgets.QWidget):
         self.l_regjobs = QtWidgets.QLabel(self)
         self.l_regemploy = QtWidgets.QLabel(self)
 
+        self.regional_spacer = QtWidgets.QLabel("", self)
+        self.l_regional = QtWidgets.QLabel("Regional:", self)
+        
+        self.local_stats_layout.addWidget(self.l_regional)
+        self.local_stats_layout.addWidget(self.regional_spacer)
         self.local_stats_layout.addWidget(self.l_regincome)
         self.local_stats_layout.addWidget(self.l_regemploy)
         self.local_stats_layout.addWidget(self.l_regpop)
         self.local_stats_layout.addWidget(self.l_regjobs)
 
+        self.global_stats_layout.addWidget(QtWidgets.QLabel("National:", self))
         self.global_stats_layout.addWidget(self.l_bal)
         self.global_stats_layout.addWidget(self.l_income)
         self.global_stats_layout.addWidget(self.l_employment)
         self.global_stats_layout.addWidget(self.l_pop)
         self.global_stats_layout.addWidget(self.l_jobs)
-        self.global_stats_layout.addWidget(self.l_lorentz)
         
         self.date_layout.addWidget(self.l_date)
+        self.date_layout.addWidget(self.l_lorentz)
         self.date_layout.addWidget(self.b_next_day)
         self.date_layout.addWidget(self.b_update_day)
+
+        self.layout.addLayout(self.local_stats_layout)
+        self.layout.addLayout(self.global_stats_layout)
+        self.layout.addLayout(self.date_layout)
+        self.setLayout(self.layout)
+
+    def hide_regional(self):
+        self.regional_spacer.hide()
+        self.l_regional.hide()
+        self.l_regincome.hide()
+        self.l_regemploy.hide()
+        self.l_regpop.hide()
+        self.l_regjobs.hide()
+
+    def show_regional(self):
+        self.regional_spacer.show()
+        self.l_regional.show()
+        self.l_regincome.show()
+        self.l_regemploy.show()
+        self.l_regpop.show()
+        self.l_regjobs.show()
+
+    def update_info(self, data: Data, curr_region: str):
+        pop, reg_pop = calc_population(data)
+        jobs, reg_jobs = calc_jobs(data)
+        income, regional_income = calc_income(data)
+        bal = calc_bal(data)
+        employment = calc_employment(data)
+
+        data.eco_cache = income # TODO maybe bad idea?
+        if curr_region != "Total":
+            self.show_regional()
+            pop_of_current_region = reg_pop[curr_region]
+            jobs_of_current_region = reg_jobs[curr_region]
         
+            if pop_of_current_region  != 0:
+                employ_percent = jobs_of_current_region  / pop_of_current_region  * 100
+            else:
+                employ_percent = 0
+
+            income_of_current_region  = regional_income[curr_region]
+
+            self.l_regincome.setText("Income: " + str(format_money(income_of_current_region)))
+            self.l_regemploy.setText("Employment: " + str(round(employ_percent, 1)) + "%")
+            self.l_regpop.setText("Population: " + str(pop_of_current_region ))
+            self.l_regjobs.setText("Jobs: " + str(round(jobs_of_current_region , 2)))
+        else:
+            # no regional stats to show
+            self.hide_regional()
+        
+        self.l_income.setText("Income: " + format_money(income))
+        self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
+        self.l_pop.setText("Population: " + str(calc_population(data)[0]))
+        self.l_jobs.setText("Jobs: " + str(round(calc_jobs(data)[0], 2)))
+
+        self.l_lorentz.setText("L: " + str(round(Building.get_lorentz(data.eco_cache), 4)))
+        self.l_date.setText("Current date: " + format_date(data.current_day.isoformat()))
+
+        self.l_bal.setText("Balance: " + format_money(bal))
+
+class Main(QtWidgets.QWidget):
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
+        self.init_gui(data)
+
+        self.show()
+        
+    def init_gui(self, data):
+        self.layout = QtWidgets.QVBoxLayout(self)
+
         self.stats_tab = StatsTab(data, self)
         self.transactions_tab = TransactionsTab(data, self)
         self.buildings_tab = BuildingsTab(data, self)
@@ -606,67 +736,24 @@ class Main(QtWidgets.QWidget):
         self.tab_widget.addTab(self.transactions_tab, "Transactions")
         self.tab_widget.addTab(self.stats_tab, "Stats")
         self.tab_widget.addTab(self.loans_tab, "Loans")
+
+        self.info_bar = InfoBar(self)
+        
         self.layout.addWidget(self.tab_widget)
-        self.layout.addLayout(self.local_stats_layout)
-        self.layout.addLayout(self.global_stats_layout)
-        self.layout.addLayout(self.date_layout)
+        self.layout.addWidget(self.info_bar)
         
         self.setLayout(self.layout)
         self.recalculate()
         self.transactions_tab.recalculate.connect(self.recalculate)
+        self.info_bar.update_day.connect(self.update_day)
+        self.buildings_tab.region_changed.connect(lambda region: self.info_bar.update_info(self.data, region))
 
     def recalculate(self):
-        self.recalc_balance()
-        self.recalc_income()
-        self.l_date.setText("Current date: " + format_date(self.data.current_day.isoformat()))
-        self.l_pop.setText("Population: " + str(calc_population(self.data)[0]))
-        self.l_jobs.setText("Jobs: " + str(round(calc_jobs(self.data)[0], 2)))
+        self.info_bar.update_info(self.data, self.buildings_tab.curr_region)
         self.buildings_tab.recalc_preview()
-        self.l_lorentz.setText("L: " + str(round(Building.get_lorentz(self.data.eco_cache), 4)))
-        self.recalc_regional_stats(self.buildings_tab)
-        
-    def recalc_regional_stats(self, buildings_tab):
-        if buildings_tab.curr_region == "Total":
-            # no regional stats
-            self.l_regincome.hide()
-            self.l_regemploy.hide()
-            self.l_regpop.hide()
-            self.l_regjobs.hide()
-        else:
-            _, reg_pop = calc_population(self.data)
-            _, reg_jobs = calc_jobs(self.data)
-            pop = reg_pop[buildings_tab.curr_region]
-            jobs = reg_jobs[buildings_tab.curr_region]
-            
-            if pop != 0:
-                employ_percent = jobs / pop * 100
-            else:
-                employ_percent = 0
 
-            _, regional_income = calc_income(self.data)
-            inc = regional_income[buildings_tab.curr_region]
-            
-            self.l_regincome.show()
-            self.l_regemploy.show()
-            self.l_regpop.show()
-            self.l_regjobs.show()
-            self.l_regincome.setText("Income (region): " + str(format_money(inc)))
-            self.l_regemploy.setText("Employment (region): " + str(round(employ_percent, 1)) + "%")
-            self.l_regpop.setText("Population (region): " + str(pop))
-            self.l_regjobs.setText("Jobs (region): " + str(round(jobs, 2)))
-            
-    def recalc_balance(self):
-        bal = calc_bal(self.data)
-        self.l_bal.setText("Balance: " + format_money(bal))
-        
-    def recalc_income(self):
-        global eco_cache
-        employment = calc_employment(self.data)
-        income, regional_income = calc_income(self.data)
-        self.data.eco_cache = income
-        
-        self.l_income.setText("Income: " + format_money(income))
-        self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
+    def send_loan_packet(self, amt, interest_rate, country_name, date):
+        pass # TODO
         
     def get_paid(self):
         # this check is currently redundant but I left it in for the lulz
