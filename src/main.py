@@ -644,12 +644,12 @@ class InfoBar(QtWidgets.QWidget):
         super().__init__(parent)
 
         self.layout = QtWidgets.QVBoxLayout(self)
-        self.local_stats_layout = QtWidgets.QHBoxLayout()
-        self.global_stats_layout = QtWidgets.QHBoxLayout()
+        self.stats_layout = QtWidgets.QGridLayout()
         self.date_layout = QtWidgets.QHBoxLayout()
         
         self.b_update_day = QtWidgets.QPushButton("Update day to today's date", self)
         self.b_next_day = QtWidgets.QPushButton("Next day", self)
+        self.b_refresh = QtWidgets.QPushButton("Refresh network", self)
         self.b_update_day.clicked.connect(lambda: self.update_day.emit(None))
         self.b_next_day.clicked.connect(lambda: self.update_day.emit(1))
 
@@ -666,35 +666,32 @@ class InfoBar(QtWidgets.QWidget):
         self.l_regjobs = QtWidgets.QLabel(self)
         self.l_regemploy = QtWidgets.QLabel(self)
 
-        self.regional_spacer = QtWidgets.QLabel("", self)
         self.l_regional = QtWidgets.QLabel("Regional:", self)
         
-        self.local_stats_layout.addWidget(self.l_regional)
-        self.local_stats_layout.addWidget(self.regional_spacer)
-        self.local_stats_layout.addWidget(self.l_regincome)
-        self.local_stats_layout.addWidget(self.l_regemploy)
-        self.local_stats_layout.addWidget(self.l_regpop)
-        self.local_stats_layout.addWidget(self.l_regjobs)
+        self.stats_layout.addWidget(self.l_regional,  0, 0)
+        self.stats_layout.addWidget(self.l_regincome, 0, 2)
+        self.stats_layout.addWidget(self.l_regemploy, 0, 3)
+        self.stats_layout.addWidget(self.l_regpop,    0, 4)
+        self.stats_layout.addWidget(self.l_regjobs,   0, 5)
 
-        self.global_stats_layout.addWidget(QtWidgets.QLabel("National:", self))
-        self.global_stats_layout.addWidget(self.l_bal)
-        self.global_stats_layout.addWidget(self.l_income)
-        self.global_stats_layout.addWidget(self.l_employment)
-        self.global_stats_layout.addWidget(self.l_pop)
-        self.global_stats_layout.addWidget(self.l_jobs)
+        self.stats_layout.addWidget(QtWidgets.QLabel("National:", self), 1, 0)
+        self.stats_layout.addWidget(self.l_bal,        1, 1)
+        self.stats_layout.addWidget(self.l_income,     1, 2)
+        self.stats_layout.addWidget(self.l_employment, 1, 3)
+        self.stats_layout.addWidget(self.l_pop,        1, 4)
+        self.stats_layout.addWidget(self.l_jobs,       1, 5)
         
         self.date_layout.addWidget(self.l_date)
         self.date_layout.addWidget(self.l_lorentz)
+        self.date_layout.addWidget(self.b_refresh)
         self.date_layout.addWidget(self.b_next_day)
         self.date_layout.addWidget(self.b_update_day)
 
-        self.layout.addLayout(self.local_stats_layout)
-        self.layout.addLayout(self.global_stats_layout)
+        self.layout.addLayout(self.stats_layout)
         self.layout.addLayout(self.date_layout)
         self.setLayout(self.layout)
 
     def _hide_regional(self):
-        self.regional_spacer.hide()
         self.l_regional.hide()
         self.l_regincome.hide()
         self.l_regemploy.hide()
@@ -702,7 +699,6 @@ class InfoBar(QtWidgets.QWidget):
         self.l_regjobs.hide()
 
     def _show_regional(self):
-        self.regional_spacer.show()
         self.l_regional.show()
         self.l_regincome.show()
         self.l_regemploy.show()

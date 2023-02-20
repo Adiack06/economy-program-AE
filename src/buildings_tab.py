@@ -95,7 +95,7 @@ class BuildingsTab(QtWidgets.QWidget):
         self.b_add.clicked.connect(self._add_building)
         self.b_newregion.clicked.connect(self._add_region)
         self.b_delregion.clicked.connect(self._del_region)
-        self.region_select.activated[str].connect(lambda r: self.region_change())
+        self.region_select.activated[str].connect(lambda r: self._region_change())
         self.building_list.building_count_decrease[BuildingEntry].connect(self._remove_building)
         self._region_change()
         self.recalc_preview()
