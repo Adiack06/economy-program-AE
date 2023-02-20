@@ -4,7 +4,6 @@ from matplotlib.backends.backend_qtagg import (
 from matplotlib.figure import Figure
 from matplotlib import pyplot as plt
 # TODO
-# display bal after hypothetical buying thing
 # edit transactions
 
 from PyQt5 import QtCore, Qt, QtGui
@@ -16,7 +15,7 @@ import os
 import datetime
 import re
 import requests
-import time # DEBUG
+import random
 sys.path.append("src")
 from typing import Union
 from building import *
@@ -40,6 +39,12 @@ else:
     ECONOMY_FILE = "economy.json"
 
 class Data:
+    """
+    Represents the economy.json file in an easier to work with way.
+    Also handles the serialisation/deserialisation of all objects.
+    This involves decoding the json and then constructing various
+    `Building`, `Transaction` and `Loan` objects from the resulting dict
+    """
     def __init__(self):
         self.regions = {}
         self.transactions = []
@@ -65,16 +70,16 @@ class Data:
                 self.regions[reg].append(self.deserialise_building(b))
         
         self.transactions = [self.deserialise_transaction(t) for t in raw_data["transactions"]]
-        self.loans = raw_data.get("loans", [])
-        self.loans = raw_data.get("given_loans", [])
+        self.loans = [self.deserialise_loan(l) for l in raw_data.get("loans", [])]
+        self.given_loans = [self.deserialise_loan(l) for l in raw_data.get("given_loans", [])]
         self.future_packets = raw_data.get("future_packets", [])
         self.eco_cache = calc_income(self)[0]
 
     def write_to_file(self, fname):
         raw_data = {"current_day": self.current_day.isoformat(),
                     "regions": {r: {"buildings": [self.serialise_building(b) for b in self.regions[r]]} for r in self.regions},
-                    "loans": self.loans,
-                    "given_loans": self.given_loans,
+                    "loans": [self.serialise_loan(l) for l in self.loans],
+                    "given_loans": [self.serialise_loan(l) for l in self.given_loans],
                     "future_packets": self.future_packets,
                     "transactions": [self.serialise_transaction(t) for t in self.transactions]}
         
@@ -109,7 +114,7 @@ class Data:
             return Building(obj, self.current_day, lorentz)
 
     def serialise_transaction(self, trans):
-        if trans.trans_type == TransactionType.MANUAL:
+        if trans.trans_type in (TransactionType.MANUAL, TransactionType.TAKEN_LOAN, TransactionType.GIVEN_LOAN):
             return {"amount": trans.amount,
                     "comment": trans.comment,
                     "type": trans.trans_type,
@@ -120,7 +125,7 @@ class Data:
                     "timestamp": trans.timestamp}
 
     def deserialise_transaction(self, object):
-        if object["type"] == TransactionType.MANUAL:
+        if object["type"] in (TransactionType.MANUAL, TransactionType.TAKEN_LOAN, TransactionType.GIVEN_LOAN):
             return Transaction(object["type"], object["timestamp"], amount=object["amount"], comment=object["comment"])
         else:
             if object.get("buildings") == None: # old transaction, assume one building + count (+ lorentz)
@@ -128,7 +133,13 @@ class Data:
                 return Transaction(object["type"], object["timestamp"], buildings=buildings)
             else: # new transaction, deserialise list of buildings with one lorentz each
                 return Transaction(object["type"], object["timestamp"], buildings=[self.deserialise_building(i) for i in object["buildings"]])
- 
+
+    def serialise_loan(self, loan):
+        return [loan.amount, loan.interest_rate, loan.country_name, loan.amount_paid, loan.uid]
+
+    def deserialise_loan(self, obj):
+        return Loan(obj[0], obj[1], obj[2], obj[3], obj[4] if len(obj) > 4 else None)
+    
     def save(self):
         self.write_to_file(ECONOMY_FILE)
 
@@ -138,6 +149,17 @@ class Data:
     def remove_region(self, reg_name):
         del self.regions[reg_name]
 
+
+class Loan:
+    def __init__(self, amount, interest_rate, country_name, amount_paid, uid=None):
+        self.amount = amount
+        self.interest_rate = interest_rate
+        self.country_name = country_name
+        self.amount_paid = amount_paid
+        if uid is None:
+            self.uid = random.randint(0, 2**31-1)
+        else:
+            self.uid = uid
 
 def update_backup_formats():
     """Load and save every backup and the economy file,
@@ -170,6 +192,7 @@ def get_historical_datas(data):
     return datas
 
 def send_info_popup(txt):
+    """Show an info messagebox"""
     msg = QtWidgets.QMessageBox()
     msg.setIcon(QtWidgets.QMessageBox.Information)
     msg.setText(txt)
@@ -177,6 +200,8 @@ def send_info_popup(txt):
     msg.exec_()
 
 class KeybindTable(QtWidgets.QTableWidget):
+    """Wrapper around a QTableWidget to expose key press events.
+    Needed for detecting the delete key to delete a transaction"""
     keyPressed = Qt.pyqtSignal(QtGui.QKeyEvent)
     def keyPressEvent(self, event):    
         if type(event) == QtGui.QKeyEvent:
@@ -237,6 +262,7 @@ class TransactionsTab(QtWidgets.QWidget):
             self.recalculate.emit()
 
     def _add_transaction_button(self):
+        """Add a manual transaction"""
         try:
             amount = round(float(self.e_amount.text()), 2)
         except ValueError:
@@ -267,6 +293,7 @@ class TransactionsTab(QtWidgets.QWidget):
         self.table.setItem(row, 2, QtWidgets.QTableWidgetItem(transaction.compute_comment()))
 
 def calc_series(datas, series):
+    """Return a list of datapoints calculated from the backups"""
     if series == "Balance":
         return [calc_bal(d) for d in datas]
     elif series == "Population":
@@ -288,6 +315,7 @@ def calc_series(datas, series):
         return [i for i, d in enumerate(datas)]
     
 class GraphControls(QtWidgets.QWidget):
+    """Left-hand side bar used to control the graph"""
     def __init__(self, figure, data, parent=None):
         super().__init__(parent)
         self.figure = figure
@@ -319,21 +347,21 @@ class GraphControls(QtWidgets.QWidget):
         
         self.setLayout(self.layout)
         
-        self.graph_type.activated[str].connect(lambda x: self.update())
-        self.x_axis.activated[str].connect(lambda x: self.update())
-        self.y_axis.activated[str].connect(lambda x: self.update())
-        self.b_plot.clicked.connect(self.plot)
-        self.b_clear.clicked.connect(self.clear)
+        self.graph_type.activated[str].connect(lambda x: self._update())
+        self.x_axis.activated[str].connect(lambda x: self._update())
+        self.y_axis.activated[str].connect(lambda x: self._update())
+        self.b_plot.clicked.connect(self._plot)
+        self.b_clear.clicked.connect(self._clear)
         
-        self.update()
+        self._update()
         
-    def clear(self):
+    def _clear(self):
         self.figure.clear()
         self.ax = self.figure.subplots()
         # self.ax.clear()
         self.figure.canvas.draw()
         
-    def update(self):
+    def _update(self):
         ty = self.graph_type.currentText()
         itemx = self.x_axis.currentIndex()
         itemy = self.y_axis.currentIndex()
@@ -361,7 +389,8 @@ class GraphControls(QtWidgets.QWidget):
         if itemy < self.y_axis.count():
             self.y_axis.setCurrentIndex(itemy)
     
-    def plot(self):
+    def _plot(self):
+        """???"""
         # TODO do it
         gtype = self.graph_type.currentText()
         xaxis = self.x_axis.currentText()
@@ -406,6 +435,7 @@ class GraphControls(QtWidgets.QWidget):
         self.figure.canvas.draw()
 
 class MoronException(Exception):
+    """For use if you make a file called `backups`"""
     pass
 
 class StatsTab(QtWidgets.QWidget):
@@ -430,9 +460,12 @@ class StatsTab(QtWidgets.QWidget):
         self.setLayout(self.layout)
 
 class LoanList(QtWidgets.QFrame):
-    def __init__(self, label, parent=None):
+    """Represents a list of loans. Basically just a manually controlled table without the table"""
+    payment_made = Qt.pyqtSignal(Loan)
+    def __init__(self, label: str, allow_payment: bool, parent=None):
         super().__init__(parent)
         self.layout = QtWidgets.QGridLayout(self)
+        self.allow_payment = allow_payment
 
         self.layout.addWidget(QtWidgets.QLabel(label, self), 0, 0, 1, 3, alignment=QtCore.Qt.AlignCenter)
         self.layout.addWidget(QtWidgets.QLabel("Amount due for payback", self), 1, 0)
@@ -441,34 +474,65 @@ class LoanList(QtWidgets.QFrame):
         self.layout.setRowStretch(1000, 1)
         
         self.setFrameStyle(QtWidgets.QFrame.Raised | QtWidgets.QFrame.StyledPanel)
-        self.curr_row = 1
+        self.curr_row = 2
+        self.loan_widgets = []
         self.setLayout(self.layout)
 
+    def add_loan_widgets(self, loan):
+        if self.allow_payment:
+            self.loan_widgets.append((
+                QtWidgets.QLabel(format_money(loan.amount)),
+                QtWidgets.QLabel(str(round(loan.interest_rate, 2)) + "%"),
+                QtWidgets.QLabel(loan.country_name),
+                QtWidgets.QPushButton("Make payment")
+            ))
+            self.loan_widgets[-1][3].clicked.connect(lambda: self.payment_made.emit(loan))
+        else:
+            # don't include the "Make payment" button
+            self.loan_widgets.append((
+                QtWidgets.QLabel(format_money(loan.amount)),
+                QtWidgets.QLabel(str(round(loan.interest_rate, 2)) + "%"),
+                QtWidgets.QLabel(loan.country_name),
+            ))
+
+        for col, w in enumerate(self.loan_widgets[-1]):
+            self.layout.addWidget(w, self.curr_row, col)
+
+        self.curr_row += 1
+
+    def clear(self):
+        for row in self.loan_widgets:
+            for w in row:
+                self.layout.removeWidget(w)
+        self.loan_widgets.clear()
+        self.curr_row = 2
+
 class LoansTab(QtWidgets.QWidget):
-    loan_given = Qt.pyqtSignal()
+    loan_given = Qt.pyqtSignal(Loan)
+    payment_made = Qt.pyqtSignal(Loan, float)
+    un_loan_taken = Qt.pyqtSignal(float)
     
     def __init__(self, data, parent=None):
         super().__init__(parent)
-        self.data = data
 
         self.layout = QtWidgets.QGridLayout(self)
         
-        self.e_amount = QtWidgets.QSpinBox(self)
+        self.e_amount = QtWidgets.QDoubleSpinBox(self)
         self.e_amount.setMaximum(999999999)
         self.l_amount = QtWidgets.QLabel("Amount", self)
-        # self.b_un = QtWidgets.QCheckBox("UN loan", self)
+        self.b_un = QtWidgets.QCheckBox("UN loan", self)
         self.e_interest_rate = QtWidgets.QDoubleSpinBox(self)
         self.l_interest_rate = QtWidgets.QLabel("Interest Rate (%)", self)
         self.e_name = QtWidgets.QLineEdit(self)
         self.l_name = QtWidgets.QLabel("Name", self)
-        self.b_give_loan = QtWidgets.QPushButton("Add loan", self)
+        self.b_give_loan = QtWidgets.QPushButton("Give loan", self)
 
-        self.given_loans_widget = LoanList("Loans given out", self)
-        self.taken_loans_widget = LoanList("Loans taken out", self)
+        self.given_loans_widget = LoanList("Loans given out", False, self)
+        self.taken_loans_widget = LoanList("Loans taken out", True, self)
 
         self.layout.addWidget(self.l_amount, 0, 0)
         self.layout.addWidget(self.e_amount, 1, 0)
-        # self.layout.addWidget(self.b_un,     1, 1)
+        self.layout.addWidget(self.b_un,     1, 1)
         self.layout.addWidget(self.l_interest_rate, 0, 2)
         self.layout.addWidget(self.e_interest_rate, 1, 2)
         self.layout.addWidget(self.l_name, 0, 3)
@@ -481,94 +545,61 @@ class LoansTab(QtWidgets.QWidget):
 
         self.setLayout(self.layout)
 
-        # self.b_un.clicked.connect(self.un_loan)
-        self.b_give_loan.clicked.connect(self.give_loan)
-        self.given_loans = []
-        self.taken_loans = []
+        self.b_un.clicked.connect(self._un_loan)
+        self.b_give_loan.clicked.connect(self._give_loan)
+        self.taken_loans_widget.payment_made.connect(self._make_payment)
+        self.update_loan_widgets(data)
 
-        # self.update_loan_widgets()
+    def _un_loan(self):
+        """Called when the UN loan checkbox changes state"""
+        if self.b_un.isChecked():
+            self.e_interest_rate.setEnabled(False)
+            self.e_interest_rate.setValue(UN_LOAN_INTEREST * 100)
+            self.e_name.setEnabled(False)
+            self.e_name.setText("UN")
+            self.b_give_loan.setText("Take loan")
+        else:
+            self.b_give_loan.setText("Give loan")
+            self.e_interest_rate.setEnabled(True)
+            self.e_name.setEnabled(True)
+            self.e_name.setText("")
 
-    # def un_loan(self):
-    #     if self.b_un.isChecked():
-    #         self.e_interest_rate.setEnabled(False)
-    #         self.e_interest_rate.setValue(UN_LOAN_INTEREST * 100)
-    #         self.e_name.setEnabled(False)
-    #         self.e_name.setText("UN")
-    #     else:
-    #         self.e_interest_rate.setEnabled(True)
-    #         self.e_name.setEnabled(True)
+    def _give_loan(self):
+        if self.b_un.isChecked():
+            self.un_loan_taken.emit(self.e_amount.value())
+            self.taken_loans_widget.add_loan_widgets(Loan(self.e_amount.value(), UN_LOAN_INTEREST * 100, "UN", 0))
+        else:
+            loan = Loan(self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), 0)
+            self.loan_given.emit(loan)
+            self.given_loans_widget.add_loan_widgets(loan)
 
-    def give_loan(self):
-        self.data.loans_given.append([self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), 0])
-        self.add_loan_widgets(data.loans[-1])
-        self.parent.transactions_tab.add_transaction(Transaction(
-            TransactionType.GIVEN_LOAN,
-            self.data.current_day.isoformat(),
-            comment="Loan to " + self.e_name.text(),
-            amount=self.e_amount.value(),
-        ))
-        self.parent.send_loan_packet(self.e_amount.value(), self.e_interest_rate.value(), self.e_name.text(), self.data.current_day.isoformat())
-        self.data.save()
-
-    def make_payment(self, pos, loan):
-        amount, ok = QtWidgets.QInputDialog.getDouble(self, "Make loan payment", "How much would you like to pay?", 0, 1, loan[0], 2)
+    def _make_payment(self, loan):
+        amount, ok = QtWidgets.QInputDialog.getDouble(self, "Make loan payment", "How much would you like to pay?", 0, 1, loan.amount, 2)
         if not ok:
             return
-
-        self.parent.transactions_tab.add_transaction(Transaction(
-            TransactionType.MANUAL,
-            self.data.current_day.isoformat(),
-            comment="Loan payment to " + loan[2],
-            amount=-amount
-        ))
-
         # this is stupid
-        idx = -1
-        for i, l in enumerate(data.loans):
-            if l[1] == loan[1] and l[2] == loan[2]:
-                idx = i
-                break
-        if idx == -1:
-            raise MoronException("For some reason the loan you tried to pay off wasn't found in your total loan list. big bug report to jams plz")
-        self.data.loans[idx][3] += amount
-        self.data.loans[idx][0] -= amount
-        if self.data.loans[idx][0] < 0.01:
-            if self.data.loans[idx][2] != "UN":
-                to_pay_other = self.data.loans[idx][3]
-                send_info_popup("You paid a total of " + format_money(to_pay_other) + " to " + self.data.loans[idx][2])
-            self.data.loans.pop(idx)
-            self.update_loan_widgets()
-        else:
-            self.loans[pos][0].setText(format_money(self.data.loans[idx][0]))
-        self.data.save()
+        # idx = -1
+        # for i, l in enumerate(data.loans):
+        #     if l[1] == loan[1] and l[2] == loan[2]:
+        #         idx = i
+        #         break
+        # if idx == -1:
+        #     raise MoronException("For some reason the loan you tried to pay off wasn't found in your total loan list. big bug report to jams plz")
+        loan.amount_paid += amount
+        loan.amount -= amount
+        self.payment_made.emit(loan, amount)
 
-    def add_loan_widgets(self, loan):
-        self.loans.append((
-            QtWidgets.QLabel(format_money(loan[0])),
-            QtWidgets.QLabel(str(round(loan[1], 2)) + "%"),
-            QtWidgets.QLabel(loan[2]),
-            QtWidgets.QPushButton("Make payment")
-        ))
-        l = len(self.loans)
-        self.loans[-1][3].clicked.connect(lambda: self.make_payment(l - 1, loan))
+    def update_loan_widgets(self, data):
+        self.given_loans_widget.clear()
+        self.taken_loans_widget.clear()
+        for loan in data.given_loans:
+            self.given_loans_widget.add_loan_widgets(loan)
 
-        for col, w in enumerate(self.loans[-1]):
-            self.ongoing_loans.addWidget(w, self.curr_row, col)
-
-        self.curr_row += 1
-
-    def update_loan_widgets(self):
-        for row in self.loans:
-            for w in row:
-                self.ongoing_loans.removeWidget(w)
-        self.loans.clear()
-
-        self.curr_row = 1
-
-        for loan in self.data.loans:
-            self.add_loan_widgets(loan)
+        for loan in data.loans:
+            self.taken_loans_widget.add_loan_widgets(loan)
 
 class NetworkHandler:
+    """receive, decode and handle network packets"""
     def __init__(self):
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -606,7 +637,8 @@ class NetworkHandler:
             pass
 
 class InfoBar(QtWidgets.QWidget):
-    update_day = Qt.pyqtSignal()
+    """Bottom bar of all tabs to show statistics"""
+    update_day = Qt.pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -661,7 +693,7 @@ class InfoBar(QtWidgets.QWidget):
         self.layout.addLayout(self.date_layout)
         self.setLayout(self.layout)
 
-    def hide_regional(self):
+    def _hide_regional(self):
         self.regional_spacer.hide()
         self.l_regional.hide()
         self.l_regincome.hide()
@@ -669,7 +701,7 @@ class InfoBar(QtWidgets.QWidget):
         self.l_regpop.hide()
         self.l_regjobs.hide()
 
-    def show_regional(self):
+    def _show_regional(self):
         self.regional_spacer.show()
         self.l_regional.show()
         self.l_regincome.show()
@@ -686,7 +718,7 @@ class InfoBar(QtWidgets.QWidget):
 
         data.eco_cache = income # TODO maybe bad idea?
         if curr_region != "Total":
-            self.show_regional()
+            self._show_regional()
             pop_of_current_region = reg_pop[curr_region]
             jobs_of_current_region = reg_jobs[curr_region]
         
@@ -703,7 +735,7 @@ class InfoBar(QtWidgets.QWidget):
             self.l_regjobs.setText("Jobs: " + str(round(jobs_of_current_region , 2)))
         else:
             # no regional stats to show
-            self.hide_regional()
+            self._hide_regional()
         
         self.l_income.setText("Income: " + format_money(income))
         self.l_employment.setText("Employment: " + str(round(employment * 100, 2)) + "%")
@@ -747,16 +779,58 @@ class Main(QtWidgets.QWidget):
         self.transactions_tab.recalculate.connect(self.recalculate)
         self.info_bar.update_day.connect(self.update_day)
         self.buildings_tab.region_changed.connect(lambda region: self.info_bar.update_info(self.data, region))
+        self.loans_tab.loan_given.connect(self.give_loan)
+        self.loans_tab.un_loan_taken.connect(self.take_un_loan)
+        self.loans_tab.payment_made.connect(self._loan_paid)
+
+    def _loan_paid(self, loan, amount):
+        if loan.amount < 0.01:
+            self.data.loans.remove(loan)
+
+        self.transactions_tab.add_transaction(Transaction(
+            TransactionType.MANUAL,
+            self.data.current_day.isoformat(),
+            comment="Loan payment to " + loan.country_name,
+            amount=-amount
+        ))
+
+        self.send_loan_payment_packet(loan, amount, self.data.current_day.isoformat())
+        self.loans_tab.update_loan_widgets(self.data)
 
     def recalculate(self):
         self.info_bar.update_info(self.data, self.buildings_tab.curr_region)
         self.buildings_tab.recalc_preview()
 
-    def send_loan_packet(self, amt, interest_rate, country_name, date):
+    def take_un_loan(self, amount: float):
+        self.data.loans.append(Loan(amount, UN_LOAN_INTEREST * 100, "UN", 0))
+        self.transactions_tab.add_transaction(Transaction(
+            TransactionType.TAKEN_LOAN,
+            self.data.current_day.isoformat(),
+            comment="UN",
+            amount=amount,
+        ))
+        self.data.save()
+
+    def give_loan(self, loan: Loan):
+        self.data.given_loans.append(loan)
+        self.transactions_tab.add_transaction(Transaction(
+            TransactionType.GIVEN_LOAN,
+            self.data.current_day.isoformat(),
+            comment=loan.country_name,
+            amount=loan.amount,
+        ))
+        self.send_loan_packet(loan, self.data.current_day.isoformat())
+        self.data.save()
+
+    def send_loan_payment_packet(self, loan: Loan, amount: float, date: str):
+        pass # TODO
+
+    def send_loan_packet(self, loan: Loan, date: str):
         pass # TODO
         
     def get_paid(self):
         # this check is currently redundant but I left it in for the lulz
+        # actually that might not be true
         for n in data.transactions[::-1]:
             if n.comment == "Income" and n.timestamp == self.data.current_day.isoformat():
                 send_info_popup("YE CANNAE FOCKEN DAE THAT M8\n(you can only get paid once per day)")
@@ -779,8 +853,8 @@ class Main(QtWidgets.QWidget):
 
     def calc_loans(self):
         for loan in self.data.loans:
-            loan[0] *= loan[1] / 100 + 1
-        self.loans_tab.update_loan_widgets()
+            loan.amount *= loan.interest_rate / 100 + 1
+        self.loans_tab.update_loan_widgets(self.data)
 
     def update_day(self, delta=None):
         if delta is not None:
@@ -812,10 +886,13 @@ class Main(QtWidgets.QWidget):
         self.data.save()
 
 def exception_hook(exctype, value, tb):
+    data.save()
+    exception_hook_no_save(exctype, value, tb)
+
+def exception_hook_no_save(exctype, value, tb):
     traceback_formated = traceback.format_exception(exctype, value, tb)
     traceback_string = "".join(traceback_formated)
     print("Excepthook called, saving and quiteing...")
-    data.save()
     print(traceback_string, file=sys.stderr)
     
     msg = QtWidgets.QMessageBox()
@@ -838,7 +915,7 @@ class Updater(QtWidgets.QDialog):
     def update(self):
         self.progress.setMinimum(0)
         self.progress.setMaximum(0)
-        self.uworker = UpdateWorker()
+        self.uworker = UpdateWorker(self)
 
         self.uworker.progress_changed.connect(lambda prog: self.progress.setValue(prog))
         self.uworker.progress_max.connect(lambda m: self.progress.setMaximum(m))
@@ -861,19 +938,22 @@ class Updater(QtWidgets.QDialog):
         self.done(updated)
 
 class UpdateWorker(QtCore.QThread):
+    """QThread that does the networking for updating"""
     progress_changed = Qt.pyqtSignal(int)
     progress_max = Qt.pyqtSignal(int)
     result = Qt.pyqtSignal(object)
     update_status = Qt.pyqtSignal(str)
 
-    def __init__(self):
+    def __init__(self, parent):
         super().__init__()
+        self.parent = parent
 
     def run(self):
         res = self.autoupdate()
         self.result.emit(res)
     
     def autoupdate(self):
+        """Check for, and install updates. Returns (updated, message)"""
         self.update_status.emit("Checking for updates...")
         try:
             vers_r = requests.get("http://cospox.com/eco/version")
@@ -883,6 +963,14 @@ class UpdateWorker(QtCore.QThread):
             return False, "Getting version, status " + str(vers_r.status_code)
         if vers_r.text.strip() == MY_VERSION:
             # already up to date
+            return False, None
+
+        choice = QtWidgets.QMessageBox.question(self.parent,
+                "Update available",
+                "Version " + vers_r.text + " is available. Do you want to update?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+        if choice == QtWidgets.QMessageBox.No:
+            # User selected not to update
             return False, None
 
         self.update_status.emit("Fetching file list...")
@@ -918,8 +1006,8 @@ class UpdateWorker(QtCore.QThread):
         return True, "Downloaded version " + vers_r.text + ". Restart program to update."
 
 if __name__ == '__main__':
-    import threading
-    sys.excepthook = exception_hook
+    # set exepthook to not save in case there's an error with loading the data
+    sys.excepthook = exception_hook_no_save
     app = QtWidgets.QApplication(sys.argv)
     updater = Updater()
     updater.update()
@@ -932,6 +1020,8 @@ if __name__ == '__main__':
     else:
         data.set_defaults()
 
+    # now the data has been loaded successfully, set normal excepthook that saves in case of error
+    sys.excepthook = exception_hook
     ex = Main(data)
     if os.path.isfile("stylesheets.qss"):
         with open("stylesheets.qss", "r") as f:

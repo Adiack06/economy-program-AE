@@ -92,15 +92,15 @@ class BuildingsTab(QtWidgets.QWidget):
         self.type_selector.activated[str].connect(lambda t: self.recalc_preview())
         self.e_count.valueChanged[int].connect(lambda n: self.recalc_preview())
         self.e_size.valueChanged[int].connect(lambda s: self.recalc_preview())
-        self.b_add.clicked.connect(self.add_building)
-        self.b_newregion.clicked.connect(self.add_region)
-        self.b_delregion.clicked.connect(self.del_region)
+        self.b_add.clicked.connect(self._add_building)
+        self.b_newregion.clicked.connect(self._add_region)
+        self.b_delregion.clicked.connect(self._del_region)
         self.region_select.activated[str].connect(lambda r: self.region_change())
-        self.building_list.building_count_decrease[BuildingEntry].connect(self.remove_building)
-        self.region_change()
+        self.building_list.building_count_decrease[BuildingEntry].connect(self._remove_building)
+        self._region_change()
         self.recalc_preview()
         
-    def add_region(self):
+    def _add_region(self):
         region = self.e_newregion.text()
         if len(region.strip()) == 0:
             send_info_popup("Enter a region name first")
@@ -115,8 +115,8 @@ class BuildingsTab(QtWidgets.QWidget):
         self.data.add_region(region)
         self.data.save()
     
-    def del_region(self):
-        if not self.check_real_region():
+    def _del_region(self):
+        if not self._check_real_region():
             return
 
         region = self.region_select.currentText()
@@ -129,7 +129,7 @@ class BuildingsTab(QtWidgets.QWidget):
         self.data.save()
         self.region_select.removeItem(self.region_select.currentIndex())
 
-    def region_change(self):
+    def _region_change(self):
         self.curr_region = self.region_select.currentText()
 
         self.building_list.clear()
@@ -196,7 +196,7 @@ class BuildingsTab(QtWidgets.QWidget):
         
         self.data.regions[self.curr_region].pop()
     
-    def check_real_region(self):
+    def _check_real_region(self):
         """check the current region is not 'Total'. If it is, warn the user
         returns whether a real region was selected"""
         if self.curr_region == "Total":
@@ -204,8 +204,8 @@ class BuildingsTab(QtWidgets.QWidget):
             return False
         return True
 
-    def add_building(self):
-        if not self.check_real_region():
+    def _add_building(self):
+        if not self._check_real_region():
             return
 
         btype = self.type_selector.currentData()
@@ -230,8 +230,8 @@ class BuildingsTab(QtWidgets.QWidget):
             buildings=[building],
         ))
         
-    def remove_building(self, entry: BuildingEntry):
-        if not self.check_real_region():
+    def _remove_building(self, entry: BuildingEntry):
+        if not self._check_real_region():
             return
 
         count, ok = QtWidgets.QInputDialog.getInt(self, "Sell building", "How many " + entry.building.name() + "s do you want to sell?", 1, 1, entry.count)
