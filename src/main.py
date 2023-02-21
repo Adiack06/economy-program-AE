@@ -16,6 +16,7 @@ import datetime
 import re
 import requests
 import random
+import socket
 sys.path.append("src")
 from typing import Union
 from building import *
@@ -53,6 +54,7 @@ class Data:
         self.given_loans = []
         self.eco_cache = 0
         self.future_packets = []
+        self.whoami = None
 
     def set_defaults(self):
         self.transactions.append(Transaction(TransactionType.MANUAL, datetime.date(2022, 10, 10).isoformat(), amount=40000, comment="Initial balance"))
@@ -74,6 +76,12 @@ class Data:
         self.given_loans = [self.deserialise_loan(l) for l in raw_data.get("given_loans", [])]
         self.future_packets = raw_data.get("future_packets", [])
         self.eco_cache = calc_income(self)[0]
+        if raw_data.get("whoami"):
+            self.whoami = raw_data["whoami"]
+        else:
+            self.whoami, entered = QtWidgets.QInputDialog.getText(None, "Select country", "Enter which country you are (for network communication)")
+            if not entered:
+                sys.exit(0)
 
     def write_to_file(self, fname):
         raw_data = {"current_day": self.current_day.isoformat(),
@@ -82,6 +90,7 @@ class Data:
                     "given_loans": [self.serialise_loan(l) for l in self.given_loans],
                     "future_packets": self.future_packets,
                     "transactions": [self.serialise_transaction(t) for t in self.transactions]}
+        # TODO in final version save whoami
         
         with open(fname, "w") as f:
             f.write(json.dumps(raw_data))
@@ -600,8 +609,10 @@ class LoansTab(QtWidgets.QWidget):
 
 class NetworkHandler:
     """receive, decode and handle network packets"""
-    def __init__(self):
+    def __init__(self, data: Data, trans):
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.data = data
+        self.trans = trans
 
     def read(self):
         data = b""
@@ -610,35 +621,51 @@ class NetworkHandler:
             if not d:
                 break
             data += d
+        print(data)
         data = json.loads(data.decode("utf-8"))
         return data
 
     def send(self, data):
         self.s.send(json.dumps(data).encode("utf-8") + b"\n")
 
-    def connect(self, data, parent):
+    def __enter__(self):
         try:
-            self.s.connect(("127.0.0.1", 7894))
+            self.s.connect(("127.0.0.1", 7896))
         except Exception as e:
             send_info_popup("Error connecting to server: " + str(e))
-            return False
+            return None
 
         self.send({"whoami": data.whoami})
         packet_queue = self.read()
         for packet in packet_queue:
-            if datetime.date.fromisoformat(packet["date"]) <= data.current_day:
-                NetworkHandler.execute_packet(packet, data, parent)
+            date = datetime.date.fromisoformat(packet["date"])
+            if date <= data.current_day:
+                NetworkHandler.execute_packet(packet, self.data, self.trans, date)
             else:
                 data.future_packets.append(packet)
-        return True
+        return self
 
-    def execute_packet(packet, data, parent):
+    def execute_packet(packet, data: Data, trans, date: datetime.date):
         if packet["type"] == "give_loan":
-            pass
+            loan = data.deserialise_loan(packet["loan"])
+            data.loans.append(loan)
+            trans.add_transaction(Transaction(
+                TransactionType.TAKEN_LOAN,
+                date.isoformat(),
+                comment=loan.country_name,
+                amount=loan.amount
+            ))
+            data.save()
+            send_info_popup(f"{loan.country_name} sent you a loan of {format_money(loan.amount)} at {loan.interest_rate:.2f}% interest")
+
+    def __exit__(self, *args):
+        self.send("exit")
+        self.s.close()
 
 class InfoBar(QtWidgets.QWidget):
     """Bottom bar of all tabs to show statistics"""
     update_day = Qt.pyqtSignal(int)
+    refresh = Qt.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -650,8 +677,9 @@ class InfoBar(QtWidgets.QWidget):
         self.b_update_day = QtWidgets.QPushButton("Update day to today's date", self)
         self.b_next_day = QtWidgets.QPushButton("Next day", self)
         self.b_refresh = QtWidgets.QPushButton("Refresh network", self)
-        self.b_update_day.clicked.connect(lambda: self.update_day.emit(None))
+        self.b_update_day.clicked.connect(lambda: self.update_day.emit(-1))
         self.b_next_day.clicked.connect(lambda: self.update_day.emit(1))
+        self.b_refresh.clicked.connect(self.refresh.emit)
 
         self.l_bal = QtWidgets.QLabel(self)
         self.l_income = QtWidgets.QLabel(self)
@@ -773,11 +801,29 @@ class Main(QtWidgets.QWidget):
         self.setLayout(self.layout)
         self.recalculate()
         self.transactions_tab.recalculate.connect(self.recalculate)
-        self.info_bar.update_day.connect(self.update_day)
+        self.info_bar.update_day.connect(lambda delta: self.update_day(delta if delta > 0 else None))
+        self.info_bar.refresh.connect(self._refresh_network)
         self.buildings_tab.region_changed.connect(lambda region: self.info_bar.update_info(self.data, region))
         self.loans_tab.loan_given.connect(self.give_loan)
         self.loans_tab.un_loan_taken.connect(self.take_un_loan)
         self.loans_tab.payment_made.connect(self._loan_paid)
+
+    def _refresh_network(self):
+        # firstly check cached packets
+        packets_to_remove = []
+        for packet in self.data.future_packets:
+            date = datetime.date.fromisoformat(packet["date"])
+            if date <= data.current_day:
+                NetworkHandler.execute_packet(packet, self.data, self.transactions_tab, date)
+                packets_to_remove.append(packet)
+
+        # there is probably a better way of doing this
+        for packet in packets_to_remove:
+            self.data.future_packets.remove(packet)
+
+        with NetworkHandler(self.data, self.transactions_tab) as net:
+            pass
+        self.loans_tab.update_loan_widgets(self.data) # TODO inefficient
 
     def _loan_paid(self, loan, amount):
         if loan.amount < 0.01:
@@ -819,10 +865,26 @@ class Main(QtWidgets.QWidget):
         self.data.save()
 
     def send_loan_payment_packet(self, loan: Loan, amount: float, date: str):
-        pass # TODO
+        with NetworkHandler(self.data, self.transactions_tab) as net:
+            if not net: return
+            net.send({"type": "loan_payment",
+                      "player": loan.country_name,
+                      "from": self.whoami,
+                      "loan_uid": loan.uid,
+                      "amount": amount,
+                      "date": date})
+        
 
     def send_loan_packet(self, loan: Loan, date: str):
-        pass # TODO
+        with NetworkHandler(self.data, self.transactions_tab) as net:
+            if not net: return
+            loan_ser = self.data.serialise_loan(loan)
+            loan_ser[2] = self.data.whoami
+            net.send({"type": "give_loan",
+                      "player": loan.country_name,
+                      "loan": loan_ser,
+                      "date": date})
+
         
     def get_paid(self):
         # this check is currently redundant but I left it in for the lulz
@@ -878,6 +940,7 @@ class Main(QtWidgets.QWidget):
             self.data.current_day += datetime.timedelta(days=delta)
         self.get_paid()
         self.calc_loans()
+        self._refresh_network()
         self.recalculate()
         self.data.save()
 
