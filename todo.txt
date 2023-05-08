@@ -1,0 +1,7 @@
+add backup of backups
+need to add mill air strip MILITARY_AIRSTRIP  - AIRPORT Military Airstrip
+mill airbase MILITARY_AIRBASE -AIRPORT Military Airbase
+fic eco graph 
+fix loans
+fix networking remnents 
+and everywhere you come across ["buildings"] get rid of it too
