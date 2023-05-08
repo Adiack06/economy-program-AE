@@ -10,7 +10,7 @@ class Building:
         self.lorentz = lorentz
         self.count = count
         
-        if self.btype == BType.AIRPORT or self.btype == BType.HOUSE:
+        if btype == BType.HOUSE or btype == BType.AIRPORT or btype == BType.MILITARY_AIRSTRIP or btype == BType.MILITARY_AIRBASE :
             assert self.size != None, "For airports and houses, the size must not be None"
 
     def get_lorentz(eco) -> float:
@@ -22,8 +22,9 @@ class Building:
         else:
             lorentz = l
 
-        if self.btype == BType.AIRPORT:
+        if self.btype == BType.AIRPORT or BType.MILITARY_AIRSTRIP or BType.MILITARY_AIRBASE:
             return ROI * self.income() * lorentz * self.count
+        
         elif self.btype == BType.HOUSE:
             return {1: 1500, 2: 3000, 4: 6000, 6: 9000}[self.size] * lorentz * self.count
         elif self.btype != BType.MILLS:
@@ -49,6 +50,14 @@ class Building:
             return str(self.size) + " block long airport"
         if self.btype == BType.HOUSE:
             return {1: "One", 2: "Two", 4: "Four", 6: "Six"}[self.size] + " person house"
+        if self.btype == BType.MILITARY_AIRSTRIP:
+            if airports_together:
+                return "Military Airstrip"
+            return str(self.size) + " block long Military Airstrip"
+        if self.btype == BType.MILITARY_AIRBASE:
+            if airports_together:
+                return "Military Airbase"
+            return str(self.size) + " block long Military Airbase"
         
         return BUILDING_INFO[self.btype].name
         

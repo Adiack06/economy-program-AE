@@ -35,7 +35,8 @@ class BuildingsTab(QtWidgets.QWidget):
         
         self.type_selector = QtWidgets.QComboBox(self)
         for btype, binfo in sorted(BUILDING_INFO.items(), key=lambda n: n[1].name):
-            self.type_selector.addItem(binfo.name, userData=btype)
+            if btype not in [BType.MILLS, BType.AIRBASE, BType.NAVAL_DOCKYARD]:
+                self.type_selector.addItem(binfo.name, userData=btype)
         self.type_selector.setMaxVisibleItems(len(BUILDING_INFO))
         
         self.e_count = QtWidgets.QSpinBox(self)
@@ -160,7 +161,7 @@ class BuildingsTab(QtWidgets.QWidget):
     def recalc_preview(self):
         btype = self.type_selector.currentData()
         count = self.e_count.value()
-        if btype == BType.HOUSE or btype == BType.AIRPORT:
+        if btype == BType.HOUSE or btype == BType.AIRPORT or btype == BType.MILITARY_AIRSTRIP or btype == BType.MILITARY_AIRBASE :
             self.e_size.show()
             self.l_size.show()
             size = self.e_size.value()
@@ -210,7 +211,7 @@ class BuildingsTab(QtWidgets.QWidget):
 
         btype = self.type_selector.currentData()
         count = self.e_count.value()
-        if btype == BType.AIRPORT or btype == BType.HOUSE:
+        if btype == BType.HOUSE or btype == BType.AIRPORT or btype == BType.MILITARY_AIRSTRIP or btype == BType.MILITARY_AIRBASE :
             building = Building(btype, self.data.current_day, Building.get_lorentz(self.data.eco_cache), self.e_size.value(), count=count)
         else:
             building = Building(btype, self.data.current_day, Building.get_lorentz(self.data.eco_cache), count=count)

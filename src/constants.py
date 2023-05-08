@@ -27,6 +27,16 @@ class BType(IntEnum):
     HOUSE                 = 21
     OFFICE                = 22
     METRO_STATION         = 23
+    BARRACKS              = 24
+    MUNITION_FACTORY      = 25
+    STORAGE_BUNKER        = 26
+    POTION_BREWERY        = 27
+    CHEMICAL_WEAPONS_FAC  = 28
+    MILITARY_AIRSTRIP     = 29
+    MILITARY_AIRBASE      = 30
+    MILITARY_DOCKYARDS    = 31
+    DRY_DOCKS             = 32
+
 
 ROI = 13
 MONEY_PREFIX = "UN$"
@@ -48,14 +58,25 @@ BUILDING_INFO = {
     BType.SMALL_FACTORY         : BuildingInfo(14.5,  6,     9048.00,  "Small Factory"),
     BType.LARGE_FACTORY         : BuildingInfo(15.5,  12,    19344.00, "Large Factory"),
     BType.FARMING               : BuildingInfo(18.5,  1/162, 11.9,     "Farming per block"),
-    BType.NAVAL_DOCKYARD        : BuildingInfo(15.5,  1,     1612.00,  "Naval dockyard per 7 blocks"),
-    BType.MILLS                 : BuildingInfo(0,     12,    25500.00, "MiLLs"),
-    BType.AIRBASE               : BuildingInfo(17.5,  4,     7280.00,  "Airbase"),
+    BType.NAVAL_DOCKYARD        : BuildingInfo(15.5,  1,     1612.00,  "Naval dockyard per 7 blocks"), #depricated 
+    BType.MILLS                 : BuildingInfo(0,     12,    25500.00, "MiLLs"), #depricated 
+    BType.AIRBASE               : BuildingInfo(17.5,  4,     7280.00,  "Airbase"), #depricated 
     BType.SUPPLY_HUB            : BuildingInfo(10.5,  1,     1092.00,  "Supply hub"),
     BType.REACTOR               : BuildingInfo(20.5,  6,     6396.00,  "Nuclear/biogas reactor"),
     BType.ELECTRICAL_GENERATION : BuildingInfo(12.5,  2,     2600.00,  "Electrical generation/storage"),
     BType.AIRPORT               : BuildingInfo(18,    0,     69,       "Airport"),
     BType.HOUSE                 : BuildingInfo(0,     0,     69420,    "House"),
     BType.OFFICE                : BuildingInfo(18,    1,     1872.00,  "Office"),
-    BType.METRO_STATION         : BuildingInfo(12.9,  1,     1341.60,  "Metro Station")
+    BType.METRO_STATION         : BuildingInfo(12.9,  1,     1341.60,  "Metro Station"),
+    BType.BARRACKS              : BuildingInfo(13,    3,     4056,     "Barracks"),
+    BType.MUNITION_FACTORY      : BuildingInfo(14.5,  6,     9048,     "Munition Factory"),
+    BType.STORAGE_BUNKER        : BuildingInfo(10,    5,     5200,     "Storage Bunker"),
+    BType.POTION_BREWERY        : BuildingInfo(13.5,  3,     4212,     "Potion Brewery"),
+    BType.CHEMICAL_WEAPONS_FAC  : BuildingInfo(15,    6,     9360,     "Chemical Weapons Fac."),
+    BType.MILITARY_AIRSTRIP     : BuildingInfo(15.5,  0.5,   806,      "Military Airstrip per 20 blocks"),
+    BType.MILITARY_AIRBASE      : BuildingInfo(16.5,  1,     1716,     "Military Airbase per 20 blocks"),
+    BType.MILITARY_DOCKYARDS    : BuildingInfo(14.5,  1,     1508,     "Military Dockyards per 7 blocks"),
+    BType.DRY_DOCKS             : BuildingInfo(15,    2,     3120,     "Dry Docks per 7 blocks")
+
+    
 }
