@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 # edit transactions
 
 from PyQt5 import QtCore, Qt, QtGui
+from PyQt5.QtWidgets import QFileDialog
 import numpy as np
 import sys
 import json
@@ -22,7 +23,13 @@ from typing import Union
 from building import *
 from constants import *
 
+import concurrent.futures
+from io import BytesIO
+from PIL import Image
+
 MY_VERSION = "1.4.1"
+
+
 
 # really bad idea tbh
 # try to guess the location of economy.json
@@ -966,6 +973,169 @@ class LoansTab(QtWidgets.QWidget):
 
         for loan in data["loans"]:
             self.add_loan_widgets(loan)
+            
+class ImageProcessingThread(QtCore.QThread):
+    progressSignal = QtCore.pyqtSignal(int)
+    
+    def __init__(self, x1, z1, x2, z2,of):
+        super().__init__()
+        self.x1 = x1
+        self.z1 = z1
+        self.x2 = x2
+        self.z2 = z2
+        self.of = of
+
+    def run(self):
+        x1 = self.x1
+        z1 = self.z1
+        x2 = self.x2
+        z2 = self.z2
+
+        rangex = int(abs((x1 - x2) / 32))
+        rangey = int(abs((z1 - z2) / 32))
+
+        todo = rangex * rangey
+        done = 0
+        for yl in range(rangey):
+            for xl in range(rangex):
+                self.download_tile(x1 + (32 * xl), z1 + (32 * yl), xl, yl)
+                done += 1
+                progress = int((done / todo) * 50)
+                self.progressSignal.emit(progress)
+                print(f"{done} out of {todo}")
+
+        for index, folder in enumerate(os.listdir("image/")):
+            done = 0
+            self.line_concatinate(index, xl, rangex, folder)
+            done += 1
+            progress = progress + int((done / rangey) * 50)
+            self.progressSignal.emit(progress)
+            print(f"{done} out of {rangey}")
+
+        images = [Image.open(f'image/concatenated/line{yl}.png') for yl in range(rangey)]
+        result_width = rangex * 128
+        result_height = rangey * 128
+        result = Image.new('RGB', (result_width, result_height))
+        for i, im in enumerate(images):
+            result.paste(im=im, box=(0, 128 * i, result_width, 128 * (i + 1)))
+        result.save(f'{self.of}/done.png')  # Save concatenated image
+        images.clear()  # Clear the list for the next iteration of the outer loop
+        folder_path = "image"
+        for root, dirs, files in os.walk(folder_path, topdown=False):
+            for file in files:
+                file_path = os.path.join(root, file)
+                os.remove(file_path)
+            for dir_name in dirs:
+                dir_path = os.path.join(root, dir_name)
+                os.rmdir(dir_path)
+
+        os.rmdir(folder_path)
+
+    def download_tile(self, x, z, xl, yl):
+        zoomout = 0
+        scaling_factor = 1
+        center_x = 0
+        center_z = -17
+        tile_size = 32
+        scaled_x = int((x - center_x) * scaling_factor + (tile_size / 2))
+        scaled_y = int(-(z - center_z) * scaling_factor + (tile_size / 2))
+
+        divided_x = scaled_x >> 5
+        divided_y = scaled_y >> 5
+        shifted_x = scaled_x // 1024
+        shifted_y = scaled_y // 1024
+        zoom_prefix = 'z' * zoomout
+        url = f'http://shenanigans-group.com:8090/tiles/ShenanigansEM_S10/flat/{shifted_x}_{shifted_y}/{zoom_prefix}{divided_x}_{divided_y}.png'
+        image = requests.get(url)
+        img = Image.open(BytesIO(image.content))
+        folder_path = f"image/line{yl}"
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        
+        tile_path = f"{folder_path}/{yl}-{xl}.png"
+        print(tile_path)
+        if not os.path.exists(tile_path):
+            img.save(tile_path)
+        img.close()
+
+    def line_concatinate(self, index, xl, rangex, folder):
+        images = [Image.open(f'image/{folder}/{index}-{xl}.png') for xl in range(rangex)]
+        result_width = rangex * 128
+        result_height = 128
+        result = Image.new('RGB', (result_width, result_height))
+        for i, im in enumerate(images):
+            result.paste(im=im, box=(128 * i, 0, 128 * (i + 1), result_height))
+        if not os.path.exists('image/concatenated'):
+            os.makedirs('image/concatenated')
+        result.save(f'image/concatenated/line{index}.png')  # Save concatenated image
+
+            
+class MapDownloadTab(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.folder_path = ""
+
+        self.layout = QtWidgets.QGridLayout(self)
+
+        # Top line: Two text input boxes with labels x1 and y1
+        x1_label = QtWidgets.QLabel("x1:")
+        y1_label = QtWidgets.QLabel("y1:")
+        self.x1_text = QtWidgets.QLineEdit()
+        self.y1_text = QtWidgets.QLineEdit()
+        self.x1_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
+        self.y1_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
+        self.layout.addWidget(x1_label, 0, 0)
+        self.layout.addWidget(y1_label, 0, 1)
+        self.layout.addWidget(self.x1_text, 0, 2)
+        self.layout.addWidget(self.y1_text, 0, 3)
+
+        # Next line: Two text input boxes with labels x2 and y2
+        x2_label = QtWidgets.QLabel("x2:")
+        y2_label = QtWidgets.QLabel("y2:")
+        self.x2_text = QtWidgets.QLineEdit()
+        self.y2_text = QtWidgets.QLineEdit()
+        self.x2_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
+        self.y2_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
+        self.layout.addWidget(x2_label, 1, 0)
+        self.layout.addWidget(y2_label, 1, 1)
+        self.layout.addWidget(self.x2_text, 1, 2)
+        self.layout.addWidget(self.y2_text, 1, 3)
+
+        # Next line: Set output location button and run button
+        self.set_output_button = QtWidgets.QPushButton("Set Output Location")
+        self.set_output_button.clicked.connect(self.set_output_location)
+        self.run_button = QtWidgets.QPushButton("Run")
+        self.run_button.clicked.connect(self.start_image_processing)
+        self.layout.addWidget(self.set_output_button, 2, 0, 1, 2)
+        self.layout.addWidget(self.run_button, 2, 2, 1, 2)
+
+        # Final line: Loading bar
+        self.progress_bar = QtWidgets.QProgressBar(self)
+        self.layout.addWidget(self.progress_bar, 3, 0)
+
+    def set_output_location(self):
+        self.folder_path = QFileDialog.getExistingDirectory(
+            self, "Select Output Folder"
+        )
+        # Perform any necessary processing with the selected folder path
+
+    def start_image_processing(self):
+        x1 = int(self.x1_text.text())
+        z1 = int(self.y1_text.text())
+        x2 = int(self.x2_text.text())
+        z2 = int(self.y2_text.text())
+        of = self.folder_path
+        
+        self.thread = ImageProcessingThread(x1, z1, x2, z2, of)
+        self.thread.progressSignal.connect(self.update_progress)
+        self.thread.start()
+
+
+    def update_progress(self, progress):
+        self.progress_bar.setValue(progress)
+
+
 
 class Main(QtWidgets.QWidget):
     def __init__(self):
@@ -1021,12 +1191,14 @@ class Main(QtWidgets.QWidget):
         self.transactions_tab = TransactionsTab(self)
         self.buildings_tab = BuildingsTab(self)
         self.loans_tab = LoansTab(self)
+        self.mapd_tab = MapDownloadTab(self)
         
         self.tab_widget = QtWidgets.QTabWidget(self)
         self.tab_widget.addTab(self.buildings_tab, "Buildings")
         self.tab_widget.addTab(self.transactions_tab, "Transactions")
         self.tab_widget.addTab(self.stats_tab, "Stats")
         self.tab_widget.addTab(self.loans_tab, "Loans")
+        self.tab_widget.addTab(self.mapd_tab, "Map Download")
         self.layout.addWidget(self.tab_widget)
         self.layout.addLayout(self.local_stats_layout)
         self.layout.addLayout(self.global_stats_layout)
