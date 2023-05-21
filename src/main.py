@@ -27,7 +27,7 @@ import concurrent.futures
 from io import BytesIO
 from PIL import Image
 
-MY_VERSION = "1.4.1"
+MY_VERSION = "1.5.0"
 
 
 
@@ -1003,14 +1003,14 @@ class ImageProcessingThread(QtCore.QThread):
                 progress = int((done / todo) * 50)
                 self.progressSignal.emit(progress)
                 print(f"{done} out of {todo}")
-
-        for index, folder in enumerate(os.listdir("image/")):
-            done = 0
-            self.line_concatinate(index, xl, rangex, folder)
+        done = 0
+        for line in range(rangey):
+            self.line_concatinate(line, xl, rangex)
             done += 1
             progress = progress + int((done / rangey) * 50)
             self.progressSignal.emit(progress)
             print(f"{done} out of {rangey}")
+
 
         images = [Image.open(f'image/concatenated/line{yl}.png') for yl in range(rangey)]
         result_width = rangex * 128
@@ -1029,8 +1029,9 @@ class ImageProcessingThread(QtCore.QThread):
                 dir_path = os.path.join(root, dir_name)
                 os.rmdir(dir_path)
 
-        os.rmdir(folder_path)
-
+        #os.rmdir(folder_path)
+        progress = 100
+        self.progressSignal.emit(progress)
     def download_tile(self, x, z, xl, yl):
         zoomout = 0
         scaling_factor = 1
@@ -1040,6 +1041,7 @@ class ImageProcessingThread(QtCore.QThread):
         scaled_x = int((x - center_x) * scaling_factor + (tile_size / 2))
         scaled_y = int(-(z - center_z) * scaling_factor + (tile_size / 2))
 
+
         divided_x = scaled_x >> 5
         divided_y = scaled_y >> 5
         shifted_x = scaled_x // 1024
@@ -1048,7 +1050,7 @@ class ImageProcessingThread(QtCore.QThread):
         url = f'http://shenanigans-group.com:8090/tiles/ShenanigansEM_S10/flat/{shifted_x}_{shifted_y}/{zoom_prefix}{divided_x}_{divided_y}.png'
         image = requests.get(url)
         img = Image.open(BytesIO(image.content))
-        folder_path = f"image/line{yl}"
+        folder_path = f"image/"
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
         
@@ -1056,10 +1058,10 @@ class ImageProcessingThread(QtCore.QThread):
         print(tile_path)
         if not os.path.exists(tile_path):
             img.save(tile_path)
-        img.close()
-
-    def line_concatinate(self, index, xl, rangex, folder):
-        images = [Image.open(f'image/{folder}/{index}-{xl}.png') for xl in range(rangex)]
+        img.close()    
+    
+    def line_concatinate(self, line, xl, rangex,):
+        images = [Image.open(f'image/{line}-{xl}.png') for xl in range(rangex)]
         result_width = rangex * 128
         result_height = 128
         result = Image.new('RGB', (result_width, result_height))
@@ -1067,52 +1069,102 @@ class ImageProcessingThread(QtCore.QThread):
             result.paste(im=im, box=(128 * i, 0, 128 * (i + 1), result_height))
         if not os.path.exists('image/concatenated'):
             os.makedirs('image/concatenated')
-        result.save(f'image/concatenated/line{index}.png')  # Save concatenated image
+        result.save(f'image/concatenated/line{line}.png')  # Save concatenated image
 
             
+
 class MapDownloadTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
         self.folder_path = ""
 
-        self.layout = QtWidgets.QGridLayout(self)
+        self.layout = QtWidgets.QVBoxLayout(self)
 
-        # Top line: Two text input boxes with labels x1 and y1
+        # First line: Two text input boxes with labels x1 and y1
+        x1_layout = QtWidgets.QHBoxLayout()
         x1_label = QtWidgets.QLabel("x1:")
-        y1_label = QtWidgets.QLabel("y1:")
         self.x1_text = QtWidgets.QLineEdit()
-        self.y1_text = QtWidgets.QLineEdit()
+        self.x1_text.setPlaceholderText("Enter x1")
         self.x1_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
+        x1_layout.addWidget(x1_label)
+        x1_layout.addWidget(self.x1_text)
+
+        y1_layout = QtWidgets.QHBoxLayout()
+        y1_label = QtWidgets.QLabel("y1:")
+        self.y1_text = QtWidgets.QLineEdit()
+        self.y1_text.setPlaceholderText("Enter y1")
         self.y1_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
-        self.layout.addWidget(x1_label, 0, 0)
-        self.layout.addWidget(y1_label, 0, 1)
-        self.layout.addWidget(self.x1_text, 0, 2)
-        self.layout.addWidget(self.y1_text, 0, 3)
+        y1_layout.addWidget(y1_label)
+        y1_layout.addWidget(self.y1_text)
 
-        # Next line: Two text input boxes with labels x2 and y2
+        # Second line: Two text input boxes with labels x2 and y2
+        x2_layout = QtWidgets.QHBoxLayout()
         x2_label = QtWidgets.QLabel("x2:")
-        y2_label = QtWidgets.QLabel("y2:")
         self.x2_text = QtWidgets.QLineEdit()
-        self.y2_text = QtWidgets.QLineEdit()
+        self.x2_text.setPlaceholderText("Enter x2")
         self.x2_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
-        self.y2_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
-        self.layout.addWidget(x2_label, 1, 0)
-        self.layout.addWidget(y2_label, 1, 1)
-        self.layout.addWidget(self.x2_text, 1, 2)
-        self.layout.addWidget(self.y2_text, 1, 3)
+        x2_layout.addWidget(x2_label)
+        x2_layout.addWidget(self.x2_text)
 
-        # Next line: Set output location button and run button
+        y2_layout = QtWidgets.QHBoxLayout()
+        y2_label = QtWidgets.QLabel("y2:")
+        self.y2_text = QtWidgets.QLineEdit()
+        self.y2_text.setPlaceholderText("Enter y2")
+        self.y2_text.setValidator(QtGui.QIntValidator())  # Accepts only integers
+        y2_layout.addWidget(y2_label)
+        y2_layout.addWidget(self.y2_text)
+
+        # Third line: Set output location button and run button
+        button_layout = QtWidgets.QHBoxLayout()
         self.set_output_button = QtWidgets.QPushButton("Set Output Location")
         self.set_output_button.clicked.connect(self.set_output_location)
         self.run_button = QtWidgets.QPushButton("Run")
         self.run_button.clicked.connect(self.start_image_processing)
-        self.layout.addWidget(self.set_output_button, 2, 0, 1, 2)
-        self.layout.addWidget(self.run_button, 2, 2, 1, 2)
+        button_layout.addWidget(self.set_output_button)
+        button_layout.addWidget(self.run_button)
 
-        # Final line: Loading bar
+        # Fourth line: Loading bar
         self.progress_bar = QtWidgets.QProgressBar(self)
-        self.layout.addWidget(self.progress_bar, 3, 0)
+
+        # Add the layouts to the main layout
+        self.layout.addLayout(x1_layout)
+        self.layout.addLayout(y1_layout)
+        self.layout.addLayout(x2_layout)
+        self.layout.addLayout(y2_layout)
+        self.layout.addLayout(button_layout)
+        self.layout.addWidget(self.progress_bar)
+        
+        self.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+            }
+            QLineEdit {
+                font-size: 14px;
+                padding: 5px;
+            }
+            QPushButton {
+                font-size: 14px;
+                padding: 5px 10px;
+                background-color: #bcbcbc;
+                color: white;
+                border: none;
+                border-radius: 3px;
+            }
+            QProgressBar {
+                background-color: #F0F0F0;
+                border: 1px solid #C0C0C0;
+                border-radius: 5px;
+                height: 10px;
+                margin-top: 5px;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+                border-radius: 5px;
+            }
+        """)
+
+
 
     def set_output_location(self):
         self.folder_path = QFileDialog.getExistingDirectory(
@@ -1198,7 +1250,7 @@ class Main(QtWidgets.QWidget):
         self.tab_widget.addTab(self.transactions_tab, "Transactions")
         self.tab_widget.addTab(self.stats_tab, "Stats")
         self.tab_widget.addTab(self.loans_tab, "Loans")
-        self.tab_widget.addTab(self.mapd_tab, "Map Download")
+        self.tab_widget.addTab(self.mapd_tab, "Map Downloader")
         self.layout.addWidget(self.tab_widget)
         self.layout.addLayout(self.local_stats_layout)
         self.layout.addLayout(self.global_stats_layout)
