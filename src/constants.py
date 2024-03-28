@@ -5,7 +5,7 @@ MARKET_STALL          = 1
 POLICE_STATION        = 2
 POST_OFFICE           = 3
 SMALL_STORE           = 4
-HOSPITAL              = 5
+MEDICAL_CLINIC        = 5
 FIRE_STATION          = 6
 SUPER_STORE           = 7
 PIER                  = 8
@@ -33,6 +33,7 @@ MILITARY_AIRSTRIP     = 29
 MILITARY_AIRBASE      = 30
 MILITARY_DOCKYARDS    = 31
 DRY_DOCKS             = 32
+HOSPITAL              = 33
 
 TRANSACTION_MANUAL = 1
 TRANSACTION_BUY    = 2
@@ -50,7 +51,7 @@ BUILDING_INFO = {
     POLICE_STATION        : BuildingInfo(19.6,  3,     6115.20,  "Police Station"),
     POST_OFFICE           : BuildingInfo(12.5,  2,     2600.00,  "Post Office"),
     SMALL_STORE           : BuildingInfo(11.5,  2,     2392.00,  "Small Store/Fuel Station"),
-    HOSPITAL              : BuildingInfo(26,    3,     8112.00,  "Hospital"),
+    MEDICAL_CLINIC        : BuildingInfo(26,    3,     8112.00,  "Medical Clinic"),
     FIRE_STATION          : BuildingInfo(19,    2,     3952.00,  "Fire station"),
     SUPER_STORE           : BuildingInfo(12.2,  4,     5075.20,  "Super Store"),
     PIER                  : BuildingInfo(14,    1,     1456.00,  "Pier"),
@@ -77,6 +78,7 @@ BUILDING_INFO = {
     MILITARY_AIRSTRIP     : BuildingInfo(15.5,  0,     806,      "Military Airstrip"),
     MILITARY_AIRBASE      : BuildingInfo(16.5,  0,     1716,     "Military Airbase"),
     MILITARY_DOCKYARDS    : BuildingInfo(14.5,  1,     1508,     "Military Dockyards per 7 blocks"),
-    DRY_DOCKS             : BuildingInfo(15,    2,     3120,     "Dry Docks per 7 blocks")
+    DRY_DOCKS             : BuildingInfo(15,    2,     3120,     "Dry Docks per 7 blocks"),
+    HOSPITAL              : BuildingInfo(20,    8,     16640,    "Hospital")
 }
 
